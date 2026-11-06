@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'src/call.dart';
 import 'src/camera_cycle.dart';
+import 'src/chat_view.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
@@ -14,6 +16,15 @@ import 'src/selftest.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   log('Tala prototype starting');
+  if (args.contains('--chat-check')) {
+    final creds = Credentials.load();
+    if (creds == null) {
+      log('check: not signed in');
+      exit(1);
+    }
+    await NcApi(creds).chatCheck();
+    exit(0);
+  }
   if (args.contains('--test-ring')) {
     final ringer = Ringer();
     await ringer.start('Tala test');
@@ -101,20 +112,50 @@ class RoomsPage extends StatefulWidget {
 }
 
 class _RoomsPageState extends State<RoomsPage> {
-  late Future<List<Room>> _rooms = widget.api.rooms();
   late final IncomingCalls _incoming = IncomingCalls(widget.api);
   final Ringer _ringer = Ringer();
   bool _dialogOpen = false;
+
+  List<Room>? _rooms;
+  Object? _roomsError;
+  String? _selected;
+  Timer? _roomTimer;
+  final Map<String, String> _drafts = {};
 
   @override
   void initState() {
     super.initState();
     _incoming.addListener(_onIncomingChanged);
     _incoming.start();
+    _refreshRooms();
+    _roomTimer =
+        Timer.periodic(const Duration(seconds: 15), (_) => _refreshRooms());
+  }
+
+  Future<void> _refreshRooms() async {
+    try {
+      final rooms = await widget.api.rooms();
+      if (!mounted) return;
+      setState(() {
+        _rooms = rooms;
+        _roomsError = null;
+      });
+    } catch (e) {
+      log('rooms: $e');
+      if (mounted) setState(() => _roomsError = e);
+    }
+  }
+
+  void _select(String? token) {
+    if (token == _selected) return;
+    setState(() => _selected = token);
+    // The conversation being left, or opened, may have just been read.
+    _refreshRooms();
   }
 
   @override
   void dispose() {
+    _roomTimer?.cancel();
     _incoming.removeListener(_onIncomingChanged);
     _incoming.dispose();
     _ringer.stop();
@@ -172,30 +213,34 @@ class _RoomsPageState extends State<RoomsPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Choose a conversation to call'), actions: [
-          IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () => setState(() => _rooms = widget.api.rooms())),
-        ]),
-        body: FutureBuilder<List<Room>>(
-          future: _rooms,
-          builder: (context, snap) {
-            if (snap.hasError) return Center(child: Text('${snap.error}'));
-            if (!snap.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            return ListView(children: [
-              for (final r in snap.data!)
-                ListTile(
-                  title: Text(r.name),
-                  trailing: r.hasCall ? const Icon(Icons.call) : null,
-                  onTap: () => _openCall(r),
+  Widget build(BuildContext context) {
+    final rooms = _rooms;
+    Room? selected;
+    for (final r in rooms ?? const <Room>[]) {
+      if (r.token == _selected) selected = r;
+    }
+    return Scaffold(
+      body: SafeArea(
+        child: ChatLayout(
+          rooms: rooms,
+          roomsError: _roomsError,
+          selected: selected,
+          onSelect: _select,
+          onRefresh: _refreshRooms,
+          conversation: selected == null
+              ? null
+              : ConversationPane(
+                  key: ValueKey(selected.token),
+                  source: widget.api,
+                  room: selected,
+                  drafts: _drafts,
+                  onBack: () => _select(null),
+                  onCall: () => _openCall(selected!),
                 ),
-            ]);
-          },
         ),
-      );
+      ),
+    );
+  }
 }
 
 class CallPage extends StatefulWidget {

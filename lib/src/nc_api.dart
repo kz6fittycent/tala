@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'chat.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 
@@ -31,11 +32,67 @@ class Credentials {
 }
 
 class Room {
-  Room(this.token, this.name, this.hasCall, this.type);
+  Room(
+    this.token,
+    this.name,
+    this.hasCall,
+    this.type, {
+    this.unread = 0,
+    this.unreadMention = false,
+    this.lastRead = 0,
+    this.lastActivity = 0,
+    this.favorite = false,
+    this.canChat = true,
+    this.canCall = true,
+    this.selfId = '',
+    this.lastMessage,
+  });
+
+  factory Room.fromJson(Map<String, dynamic> r) {
+    final type = r['type'] as int;
+    final readOnly = r['readOnly'] == 1;
+    final hasCall = r['hasCall'] == true;
+    final last = r['lastMessage'];
+    // Chat permission bit, from Talk's attendee permissions.
+    const chatPermission = 128;
+    final permissions = r['permissions'] as int?;
+    return Room(
+      r['token'] as String,
+      (r['displayName'] ?? r['name'] ?? '?') as String,
+      hasCall,
+      type,
+      unread: r['unreadMessages'] as int? ?? 0,
+      unreadMention: r['unreadMention'] == true,
+      lastRead: r['lastReadMessage'] as int? ?? 0,
+      lastActivity: r['lastActivity'] as int? ?? 0,
+      favorite: r['isFavorite'] == true,
+      canChat: !readOnly &&
+          (permissions == null || permissions & chatPermission != 0),
+      // Talk updates (4) and Note to self (6) can't hold calls.
+      canCall: !readOnly &&
+          type != 4 &&
+          type != 6 &&
+          (hasCall || r['canStartCall'] != false),
+      selfId: r['actorId'] as String? ?? '',
+      lastMessage: last is Map && last['id'] is int
+          ? ChatMessage.fromJson(last.cast<String, dynamic>())
+          : null,
+    );
+  }
+
   final String token;
   final String name;
   final bool hasCall;
-  final int type; // 1 one-to-one, 2 group, 3 public
+  final int type; // 1 one-to-one, 2 group, 3 public, 4 updates, 6 note to self
+  final int unread;
+  final bool unreadMention;
+  final int lastRead;
+  final int lastActivity;
+  final bool favorite;
+  final bool canChat;
+  final bool canCall;
+  final String selfId;
+  final ChatMessage? lastMessage;
 }
 
 class SignalingSettings {
@@ -73,15 +130,7 @@ class SignalingSettings {
   }
 }
 
-class ApiException implements Exception {
-  ApiException(this.status, this.path);
-  final int status;
-  final String path;
-  @override
-  String toString() => 'HTTP $status on $path';
-}
-
-class NcApi implements CallSource {
+class NcApi implements CallSource, ChatSource {
   NcApi(this.creds);
   final Credentials creds;
   final HttpClient _http = HttpClient()..userAgent = 'Tala desktop prototype';
@@ -89,6 +138,70 @@ class NcApi implements CallSource {
 
   static const _talkV4 = '/ocs/v2.php/apps/spreed/api/v4';
   static const _talkV3 = '/ocs/v2.php/apps/spreed/api/v3';
+  static const _chatV1 = '/ocs/v2.php/apps/spreed/api/v1/chat';
+
+  /// Reading never moves the read marker or clears notifications here; that
+  /// happens only through [chatMarkRead].
+  Future<List<ChatMessage>> _chatGet(String token, Map<String, String> query,
+      {required Duration timeout}) async {
+    final path = '$_chatV1/$token';
+    final uri = Uri.parse('${creds.server}$path').replace(queryParameters: {
+      'limit': '100',
+      'setReadMarker': '0',
+      'markNotificationsAsRead': '0',
+      'includeLastKnown': '0',
+      ...query,
+    });
+    final req = await _http.getUrl(uri);
+    _authHeaders(req);
+    req.cookies.addAll(_cookies.values);
+    try {
+      final res = await req.close().timeout(timeout);
+      final text = await res.transform(utf8.decoder).join().timeout(timeout);
+      if (res.statusCode == 304) return const [];
+      if (res.statusCode >= 300) throw ApiException(res.statusCode, path);
+      final data = (jsonDecode(text) as Map)['ocs']?['data'];
+      return [
+        for (final m in data as List)
+          ChatMessage.fromJson((m as Map).cast<String, dynamic>()),
+      ];
+    } on TimeoutException {
+      req.abort();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<List<ChatMessage>> chatHistory(String token, {int? beforeId}) =>
+      _chatGet(
+          token,
+          {
+            'lookIntoFuture': '0',
+            if (beforeId != null) 'lastKnownMessageId': '$beforeId',
+          },
+          timeout: const Duration(seconds: 30));
+
+  @override
+  Future<List<ChatMessage>> chatWait(String token, int afterId) => _chatGet(
+      token,
+      {
+        'lookIntoFuture': '1',
+        'lastKnownMessageId': '$afterId',
+        'timeout': '30',
+      },
+      timeout: const Duration(seconds: 45));
+
+  @override
+  Future<ChatMessage> chatSend(
+      String token, String text, String referenceId) async {
+    final d = await _ocs('POST', '$_chatV1/$token',
+        body: {'message': text, 'referenceId': referenceId});
+    return ChatMessage.fromJson((d as Map).cast<String, dynamic>());
+  }
+
+  @override
+  Future<void> chatMarkRead(String token, int id) =>
+      _ocs('POST', '$_chatV1/$token/read', body: {'lastReadMessage': id});
 
   Future<dynamic> _ocs(String method, String path,
       {Map<String, dynamic>? body}) async {
@@ -178,13 +291,47 @@ class NcApi implements CallSource {
 
   Future<List<Room>> rooms() async {
     final data = await _ocs('GET', '$_talkV4/room') as List;
-    return [
-      for (final r in data)
-        // Read-only conversations such as Talk updates can't hold calls.
-        if (r['readOnly'] != 1)
-          Room(r['token'], r['displayName'] ?? r['name'] ?? '?',
-              (r['hasCall'] ?? false) as bool, r['type'] as int)
+    final rooms = [
+      for (final r in data) Room.fromJson((r as Map).cast<String, dynamic>()),
     ];
+    return rooms
+      ..sort((a, b) {
+        if (a.favorite != b.favorite) return a.favorite ? -1 : 1;
+        return b.lastActivity.compareTo(a.lastActivity);
+      });
+  }
+
+  /// Read-only check against the real server. Logs only counts and message
+  /// kinds, never names or text.
+  Future<void> chatCheck() async {
+    final rooms = await this.rooms();
+    log('check: ${rooms.length} conversations, '
+        '${rooms.where((r) => r.lastMessage != null).length} with a last message, '
+        'types ${rooms.map((r) => r.type).toSet()}, '
+        'chat allowed ${rooms.where((r) => r.canChat).length}, '
+        'calls allowed ${rooms.where((r) => r.canCall).length}');
+    var total = 0, hidden = 0, withParent = 0;
+    final kinds = <String>{}, types = <String>{};
+    final segments = <SegmentKind>{};
+    for (final r in rooms) {
+      try {
+        final got = await chatHistory(r.token);
+        total += got.length;
+        for (final m in got) {
+          if (m.isHidden) hidden++;
+          if (m.parent != null) withParent++;
+          if (m.systemKind.isNotEmpty) kinds.add(m.systemKind);
+          types.add(m.type);
+          segments.addAll(m.segments.map((s) => s.kind));
+        }
+      } catch (e) {
+        log('check: a conversation failed: $e');
+      }
+    }
+    log('check: $total messages parsed, $hidden hidden, $withParent replies');
+    log('check: types $types');
+    log('check: system kinds $kinds');
+    log('check: segments $segments');
   }
 
   Future<SignalingSettings> signalingSettings(String token) async =>
