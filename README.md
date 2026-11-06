@@ -1,17 +1,23 @@
-# tala
+# Tala
 
-A new Flutter project.
+Chat, audio calls and video calls for Nextcloud Talk, as a native desktop app
+for Linux. Tala (Old Norse "to speak") is an independent project, not affiliated
+with or endorsed by Nextcloud GmbH.
 
-## Getting Started
+It's early, and not packaged yet. Help is on the
+[wiki](https://github.com/kz6fittycent/tala/wiki).
 
-This project is a starting point for a Flutter application.
+## Building
 
-A few resources to get you started if this is your first Flutter project:
+You need Flutter, plus `libayatana-appindicator3-dev` and `libsecret-1-dev`.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+    flutter build linux --release
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Support Tala
+
+Tala is free and stays free. A one-time or monthly tip on
+[Ko-fi](https://ko-fi.com/kz6fittycent) helps keep it going.
+
+## License
+
+GNU Affero General Public License, version 3. See `LICENSE`.

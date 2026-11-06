@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import 'log.dart';
 
-/// How the conversation list looks on this computer. None of this goes to the
-/// server, so archiving and other devices are unaffected.
-class ListPrefs extends ChangeNotifier {
-  ListPrefs({File? file})
+/// Choices that belong to this computer. None of this goes to the server, so
+/// other devices and the user's archive are unaffected.
+class AppSettings extends ChangeNotifier {
+  AppSettings({File? file})
     : _file = file ??
           File(
             '${Platform.environment['HOME']}'
@@ -20,6 +20,7 @@ class ListPrefs extends ChangeNotifier {
   final File _file;
   bool _hideArchived = false;
   bool _archivedOpen = false;
+  ThemeMode _themeMode = ThemeMode.system;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -28,6 +29,9 @@ class ListPrefs extends ChangeNotifier {
   /// Whether the Archived section is expanded. Starts collapsed.
   bool get archivedOpen => _archivedOpen;
   set archivedOpen(bool value) => _change(() => _archivedOpen = value);
+
+  ThemeMode get themeMode => _themeMode;
+  set themeMode(ThemeMode value) => _change(() => _themeMode = value);
 
   void _change(VoidCallback apply) {
     apply();
@@ -42,6 +46,9 @@ class ListPrefs extends ChangeNotifier {
       if (d is! Map) return;
       _hideArchived = d['hideArchived'] == true;
       _archivedOpen = d['archivedOpen'] == true;
+      for (final mode in ThemeMode.values) {
+        if (d['theme'] == mode.name) _themeMode = mode;
+      }
     } on FormatException {
       log('settings: could not be read, using defaults');
     } on FileSystemException catch (e) {
@@ -57,6 +64,7 @@ class ListPrefs extends ChangeNotifier {
       temp.writeAsStringSync(jsonEncode({
         'hideArchived': _hideArchived,
         'archivedOpen': _archivedOpen,
+        'theme': _themeMode.name,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

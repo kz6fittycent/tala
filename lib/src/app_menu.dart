@@ -1,0 +1,331 @@
+import 'package:flutter/material.dart';
+
+import 'app_info.dart';
+import 'chat_view.dart';
+import 'log.dart';
+import 'nc_api.dart';
+import 'settings.dart';
+
+/// Host and any port or subfolder, for showing to people.
+String serverLabel(String server) {
+  final uri = Uri.tryParse(server);
+  if (uri == null || uri.host.isEmpty) return server;
+  final port = uri.hasPort ? ':${uri.port}' : '';
+  final path = uri.path.replaceAll(RegExp(r'/+$'), '');
+  return '${uri.host}$port$path';
+}
+
+String normalizeServerUrl(String input) {
+  final url = input.trim().replaceAll(RegExp(r'/+$'), '');
+  if (url.isEmpty) return '';
+  return url.startsWith(RegExp(r'https?://')) ? url : 'https://$url';
+}
+
+/// Asks for a server and runs the browser sign-in. Nothing is stored here.
+class SignInForm extends StatefulWidget {
+  const SignInForm({
+    super.key,
+    required this.onSignedIn,
+    this.initialServer = '',
+    this.signIn = loginFlow,
+  });
+
+  final ValueChanged<Credentials> onSignedIn;
+  final String initialServer;
+  final Future<Credentials> Function(String, {bool Function()? isCancelled})
+  signIn;
+
+  @override
+  State<SignInForm> createState() => _SignInFormState();
+}
+
+class _SignInFormState extends State<SignInForm> {
+  late final TextEditingController _server = TextEditingController(
+    text: widget.initialServer,
+  );
+  String? _status;
+  bool _waiting = false;
+
+  /// Bumped to abandon a sign-in that's still waiting on the browser.
+  int _attempt = 0;
+
+  Future<void> _go() async {
+    final url = normalizeServerUrl(_server.text);
+    if (url.isEmpty) return;
+    final attempt = ++_attempt;
+    setState(() {
+      _waiting = true;
+      _status = 'Approve the login in your browser…';
+    });
+    try {
+      final creds = await widget.signIn(
+        url,
+        isCancelled: () => attempt != _attempt,
+      );
+      if (!mounted || attempt != _attempt) return;
+      widget.onSignedIn(creds);
+    } on LoginCancelled {
+      // The user already moved on.
+    } catch (e) {
+      log('login: $e');
+      if (mounted && attempt == _attempt) {
+        setState(() {
+          _waiting = false;
+          _status = 'Login failed: $e';
+        });
+      }
+    }
+  }
+
+  void _cancel() {
+    _attempt++;
+    setState(() {
+      _waiting = false;
+      _status = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    _attempt++;
+    _server.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      TextField(
+        controller: _server,
+        enabled: !_waiting,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Nextcloud server address',
+        ),
+        onSubmitted: (_) => _go(),
+      ),
+      const SizedBox(height: 16),
+      if (_waiting)
+        OutlinedButton(onPressed: _cancel, child: const Text('Cancel sign-in'))
+      else
+        FilledButton(onPressed: _go, child: const Text('Sign in')),
+      if (_status != null) ...[const SizedBox(height: 16), Text(_status!)],
+    ],
+  );
+}
+
+enum _MenuChoice { account, system, light, dark, archived, help, about, support }
+
+class AppMenu extends StatelessWidget {
+  const AppMenu({
+    super.key,
+    required this.settings,
+    required this.creds,
+    required this.onChangeAccount,
+  });
+
+  final AppSettings settings;
+  final Credentials creds;
+  final ValueChanged<Credentials> onChangeAccount;
+
+  PopupMenuItem<_MenuChoice> _item(
+    _MenuChoice value,
+    IconData icon,
+    String label,
+  ) => PopupMenuItem(
+    value: value,
+    child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon),
+      title: Text(label),
+    ),
+  );
+
+  CheckedPopupMenuItem<_MenuChoice> _theme(
+    _MenuChoice value,
+    ThemeMode mode,
+    String label,
+  ) => CheckedPopupMenuItem(
+    value: value,
+    checked: settings.themeMode == mode,
+    child: Text(label),
+  );
+
+  void _chosen(BuildContext context, _MenuChoice choice) {
+    switch (choice) {
+      case _MenuChoice.account:
+        showDialog<void>(
+          context: context,
+          builder: (_) =>
+              AccountDialog(creds: creds, onChangeAccount: onChangeAccount),
+        );
+      case _MenuChoice.system:
+        settings.themeMode = ThemeMode.system;
+      case _MenuChoice.light:
+        settings.themeMode = ThemeMode.light;
+      case _MenuChoice.dark:
+        settings.themeMode = ThemeMode.dark;
+      case _MenuChoice.archived:
+        settings.hideArchived = !settings.hideArchived;
+      case _MenuChoice.help:
+        openExternal(wikiUrl);
+      case _MenuChoice.about:
+        showDialog<void>(context: context, builder: (_) => const AboutTala());
+      case _MenuChoice.support:
+        openExternal(supportUrl);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<_MenuChoice>(
+    tooltip: 'Menu',
+    icon: const Icon(Icons.more_vert),
+    onSelected: (choice) => _chosen(context, choice),
+    itemBuilder: (context) => [
+      PopupMenuItem(
+        value: _MenuChoice.account,
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.dns_outlined),
+          title: Text(creds.user, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            serverLabel(creds.server),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+      const PopupMenuDivider(),
+      const PopupMenuItem(enabled: false, height: 32, child: Text('Theme')),
+      _theme(_MenuChoice.system, ThemeMode.system, 'System'),
+      _theme(_MenuChoice.light, ThemeMode.light, 'Light'),
+      _theme(_MenuChoice.dark, ThemeMode.dark, 'Dark'),
+      const PopupMenuDivider(),
+      CheckedPopupMenuItem(
+        value: _MenuChoice.archived,
+        checked: !settings.hideArchived,
+        child: const Text('Show archived'),
+      ),
+      const PopupMenuDivider(),
+      _item(_MenuChoice.help, Icons.help_outline, 'Help'),
+      _item(_MenuChoice.about, Icons.info_outline, 'About Tala'),
+      _item(_MenuChoice.support, Icons.favorite_outline, 'Support Tala'),
+    ],
+  );
+}
+
+class AccountDialog extends StatefulWidget {
+  const AccountDialog({
+    super.key,
+    required this.creds,
+    required this.onChangeAccount,
+  });
+
+  final Credentials creds;
+  final ValueChanged<Credentials> onChangeAccount;
+
+  @override
+  State<AccountDialog> createState() => _AccountDialogState();
+}
+
+class _AccountDialogState extends State<AccountDialog> {
+  bool _changing = false;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Account'),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SelectableText('Signed in as ${widget.creds.user}'),
+          const SizedBox(height: 4),
+          SelectableText('Server: ${serverLabel(widget.creds.server)}'),
+          if (_changing) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Sign in to the new address. You stay on this server until that '
+              'works, then Tala removes its app password from this one.',
+            ),
+            const SizedBox(height: 8),
+            SignInForm(
+              initialServer: widget.creds.server,
+              onSignedIn: (creds) {
+                Navigator.of(context).pop();
+                widget.onChangeAccount(creds);
+              },
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      if (!_changing)
+        TextButton(
+          onPressed: () => setState(() => _changing = true),
+          child: const Text('Change server…'),
+        ),
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Close'),
+      ),
+    ],
+  );
+}
+
+class AboutTala extends StatelessWidget {
+  const AboutTala({super.key});
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    icon: Image.asset('assets/icon/tala-small-64.png', width: 64, height: 64),
+    title: const Text('Tala'),
+    content: const SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Version $appVersion'),
+          SizedBox(height: 12),
+          Text(
+            'Chat and calls for Nextcloud Talk.',
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Tala is an independent project, not affiliated with or endorsed '
+            'by Nextcloud GmbH.',
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Copyright © 2026 kz6fittycent. Free software under the GNU '
+            'Affero General Public License, version 3.',
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => showLicensePage(
+          context: context,
+          applicationName: 'Tala',
+          applicationVersion: appVersion,
+        ),
+        child: const Text('Licenses'),
+      ),
+      TextButton(
+        onPressed: () => openExternal(repoUrl),
+        child: const Text('Source code'),
+      ),
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Close'),
+      ),
+    ],
+  );
+}

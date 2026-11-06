@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'package:flutter/services.dart';
+
 import 'src/account_store.dart';
+import 'src/app_menu.dart';
 import 'src/call.dart';
 import 'src/chat.dart';
 import 'src/camera_cycle.dart';
@@ -12,10 +16,10 @@ import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
 import 'src/desktop_notify.dart';
 import 'src/incoming_calls.dart';
-import 'src/list_prefs.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
 import 'src/ringer.dart';
+import 'src/settings.dart';
 import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
@@ -23,6 +27,12 @@ import 'src/selftest.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   log('Tala prototype starting');
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['Tala'],
+      await rootBundle.loadString('LICENSE'),
+    );
+  });
   if (args.contains('--chat-check')) {
     final Credentials? creds;
     try {
@@ -51,6 +61,16 @@ Future<void> main(List<String> args) async {
     log('ring test done');
     exit(0);
   }
+  if (args.contains('--badge-test')) {
+    // Shows a count on the dock for a moment, for checking how it looks.
+    final tray = AppTray();
+    await tray.setBadge(7);
+    log('badge test: 7 for 15 seconds');
+    await Future<void>.delayed(const Duration(seconds: 15));
+    await tray.setBadge(0);
+    log('badge test: cleared');
+    exit(0);
+  }
   if (args.contains('--tray-selftest')) {
     runApp(const TraySelfTest());
     return;
@@ -59,26 +79,52 @@ Future<void> main(List<String> args) async {
       ? const SelfTest()
       : args.contains('--camera-cycle')
           ? const CameraCycle()
-          : const TalaApp());
+          : TalaApp(startHidden: args.contains('--background')));
 }
 
-class TalaApp extends StatelessWidget {
-  const TalaApp({super.key});
+class TalaApp extends StatefulWidget {
+  const TalaApp({super.key, required this.startHidden});
+  final bool startHidden;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: 'Tala',
-        theme: ThemeData(colorSchemeSeed: Colors.indigo),
-        darkTheme: ThemeData(
-            colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
-        home: const StartPage(),
-      );
+  State<TalaApp> createState() => _TalaAppState();
+}
+
+class _TalaAppState extends State<TalaApp> {
+  final AppSettings _settings = AppSettings();
+
+  @override
+  void dispose() {
+    _settings.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _settings,
+    builder: (context, _) => MaterialApp(
+      title: 'Tala',
+      theme: ThemeData(colorSchemeSeed: Colors.indigo),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.indigo,
+        brightness: Brightness.dark,
+      ),
+      themeMode: _settings.themeMode,
+      home: StartPage(settings: _settings, startHidden: widget.startHidden),
+    ),
+  );
 }
 
 /// Finds the saved account. The window stays hidden on a background start
 /// unless this needs the user, as they'd otherwise have no idea why nothing
 /// is happening.
 class StartPage extends StatefulWidget {
-  const StartPage({super.key});
+  const StartPage({
+    super.key,
+    required this.settings,
+    required this.startHidden,
+  });
+  final AppSettings settings;
+  final bool startHidden;
   @override
   State<StartPage> createState() => _StartPageState();
 }
@@ -109,6 +155,55 @@ class _StartPageState extends State<StartPage> {
   void dispose() {
     _slowTimer?.cancel();
     super.dispose();
+  }
+
+  /// Used for a first sign-in and for moving to another server.
+  Future<void> _useAccount(Credentials creds) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final previous = _api;
+    final next = NcApi(creds);
+    try {
+      await _store.save(creds);
+    } on KeyringException catch (e) {
+      log('account: saving to the keyring failed: ${e.message}');
+      if (previous != null) {
+        // The keyring still holds the old account, which has to keep working.
+        await next.revokeAppPassword().catchError((Object _) {});
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Your keyring couldn\'t save the new server, so you '
+              'stay on this one.'),
+        ));
+        return;
+      }
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Signed in, but your keyring couldn\'t save it. '
+            'You\'ll need to sign in again next time.'),
+      ));
+    }
+    if (!mounted) return;
+    // One frame with no account, so the old page's cleanup finishes before the
+    // new page takes over the tray.
+    setState(() {
+      _api = null;
+      _loading = true;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    setState(() {
+      _api = next;
+      _loading = false;
+    });
+    if (previous == null) return;
+    try {
+      await previous.revokeAppPassword();
+    } catch (e) {
+      log('account: removing the old app password failed: $e');
+      messenger.showSnackBar(SnackBar(
+        content: Text('Tala couldn\'t remove its app password from '
+            '${serverLabel(previous.creds.server)}. You can revoke it in that '
+            'server\'s security settings.'),
+      ));
+    }
   }
 
   void _retry() {
@@ -202,74 +297,41 @@ class _StartPageState extends State<StartPage> {
       );
     }
     final api = _api;
-    return api == null ? const LoginPage() : RoomsPage(api: api);
+    return api == null
+        ? LoginPage(onSignedIn: _useAccount)
+        : RoomsPage(
+            api: api,
+            settings: widget.settings,
+            startHidden: widget.startHidden,
+            onChangeAccount: _useAccount,
+          );
   }
 }
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
-  final _server = TextEditingController();
-  String? _status;
-
-  Future<void> _go() async {
-    var url = _server.text.trim();
-    if (url.isEmpty) return;
-    if (!url.startsWith('http')) url = 'https://$url';
-    setState(() => _status = 'Approve the login in your browser…');
-    try {
-      final creds = await loginFlow(url);
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.of(context);
-      try {
-        await AccountStore().save(creds);
-      } on KeyringException catch (e) {
-        log('login: saving to the keyring failed: ${e.message}');
-        messenger.showSnackBar(const SnackBar(
-          content: Text('Signed in, but your keyring couldn\'t save it. '
-              'You\'ll need to sign in again next time.'),
-        ));
-      }
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-          builder: (_) => RoomsPage(api: NcApi(creds))));
-    } catch (e) {
-      log('login: $e');
-      setState(() => _status = 'Login failed: $e');
-    }
-  }
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key, required this.onSignedIn});
+  final ValueChanged<Credentials> onSignedIn;
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: 420,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(
-                controller: _server,
-                decoration: const InputDecoration(
-                    labelText: 'Nextcloud server address'),
-                onSubmitted: (_) => _go(),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _go, child: const Text('Sign in')),
-              if (_status != null) ...[
-                const SizedBox(height: 16),
-                Text(_status!),
-              ],
-            ]),
-          ),
-        ),
-      );
+    body: Center(
+      child: SizedBox(width: 420, child: SignInForm(onSignedIn: onSignedIn)),
+    ),
+  );
 }
 
 class RoomsPage extends StatefulWidget {
-  const RoomsPage({super.key, required this.api});
+  const RoomsPage({
+    super.key,
+    required this.api,
+    required this.settings,
+    required this.startHidden,
+    required this.onChangeAccount,
+  });
   final NcApi api;
+  final AppSettings settings;
+  final bool startHidden;
+  final ValueChanged<Credentials> onChangeAccount;
   @override
   State<RoomsPage> createState() => _RoomsPageState();
 }
@@ -284,7 +346,9 @@ class _RoomsPageState extends State<RoomsPage> {
   String? _selected;
   Timer? _roomTimer;
   final Map<String, String> _drafts = {};
-  final ListPrefs _listPrefs = ListPrefs();
+  List<FederationInvite> _invites = const [];
+  Timer? _inviteTimer;
+  bool _inviteFailureLogged = false;
   final DesktopNotifier _notifier = DesktopNotifier();
   late final AppLifecycleListener _lifecycle;
   late final ChatAlerts _alerts = ChatAlerts(
@@ -298,7 +362,7 @@ class _RoomsPageState extends State<RoomsPage> {
       log('chat: clearing a notification failed: $e');
     }),
   );
-  bool _focused = true;
+  late bool _focused = !widget.startHidden;
   final AppTray _tray = AppTray();
 
   /// Runs before the process ends when the user quits from the tray.
@@ -316,6 +380,7 @@ class _RoomsPageState extends State<RoomsPage> {
     _lifecycle = AppLifecycleListener(onStateChange: (state) {
       log('app: ${state.name}');
       _focused = state == AppLifecycleState.resumed;
+      _updateBadge();
     });
     widget.api
       ..onChatNotes = _alerts.update
@@ -325,6 +390,9 @@ class _RoomsPageState extends State<RoomsPage> {
     _refreshRooms();
     _roomTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => _refreshRooms());
+    _refreshInvites();
+    _inviteTimer =
+        Timer.periodic(const Duration(minutes: 1), (_) => _refreshInvites());
   }
 
   Future<void> _refreshRooms() async {
@@ -335,10 +403,65 @@ class _RoomsPageState extends State<RoomsPage> {
         _rooms = rooms;
         _roomsError = null;
       });
+      _updateBadge();
     } catch (e) {
       log('rooms: $e');
       if (mounted) setState(() => _roomsError = e);
     }
+  }
+
+  void _updateBadge() {
+    _tray.setBadge(_focused ? 0 : dockUnread(_rooms ?? const []));
+  }
+
+  Future<void> _refreshInvites() async {
+    try {
+      final invites = await widget.api.federationInvites();
+      _inviteFailureLogged = false;
+      if (mounted) setState(() => _invites = invites);
+    } catch (e) {
+      // Servers without federation refuse this, so it isn't worth repeating.
+      if (!_inviteFailureLogged) log('invites: $e');
+      _inviteFailureLogged = true;
+    }
+  }
+
+  Future<void> _answerInvite(FederationInvite invite, bool accept) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await (accept
+          ? widget.api.acceptInvite(invite.id)
+          : widget.api.declineInvite(invite.id));
+    } catch (e) {
+      log('invites: answering failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Couldn\'t answer that invitation.')),
+      );
+    }
+    await _refreshInvites();
+    await _refreshRooms();
+  }
+
+  Future<void> _setArchived(Room room, bool archived) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.api.setArchived(room.token, archived);
+    } catch (e) {
+      log('rooms: changing archive failed: $e');
+      messenger.showSnackBar(SnackBar(
+        content: Text('Couldn\'t ${archived ? 'archive' : 'unarchive'} '
+            '${room.name}.'),
+      ));
+      return;
+    }
+    await _refreshRooms();
+    messenger.showSnackBar(SnackBar(
+      content: Text('${archived ? 'Archived' : 'Unarchived'} ${room.name}'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => _setArchived(room, !archived),
+      ),
+    ));
   }
 
   Future<void> _removeRoom(Room room) async {
@@ -397,7 +520,8 @@ class _RoomsPageState extends State<RoomsPage> {
       ..onConversationRead = null;
     _notifier.closeAll();
     _roomTimer?.cancel();
-    _listPrefs.dispose();
+    _inviteTimer?.cancel();
+    _tray.setBadge(0);
     _incoming.removeListener(_onIncomingChanged);
     _incoming.dispose();
     _ringer.stop();
@@ -472,7 +596,20 @@ class _RoomsPageState extends State<RoomsPage> {
           onSelect: _select,
           onRefresh: _refreshRooms,
           onRemove: _removeRoom,
-          listPrefs: _listPrefs,
+          onArchive: (room) => _setArchived(room, !room.archived),
+          settings: widget.settings,
+          menu: AppMenu(
+            settings: widget.settings,
+            creds: widget.api.creds,
+            onChangeAccount: widget.onChangeAccount,
+          ),
+          banner: _invites.isEmpty
+              ? null
+              : InviteBanners(
+                  invites: _invites,
+                  onAccept: (i) => _answerInvite(i, true),
+                  onDecline: (i) => _answerInvite(i, false),
+                ),
           conversation: selected == null
               ? null
               : ConversationPane(

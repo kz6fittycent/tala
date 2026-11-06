@@ -8,6 +8,9 @@ import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 
+/// Thrown when the user abandons a sign-in that's waiting on the browser.
+class LoginCancelled implements Exception {}
+
 class Credentials {
   Credentials(this.server, this.user, this.appPassword);
   final String server;
@@ -33,6 +36,9 @@ class Room {
     this.canLeave = true,
     this.isModerator = false,
     this.archived = false,
+    this.canArchive = false,
+    this.muted = false,
+    this.remoteServer = '',
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -67,6 +73,10 @@ class Room {
       isModerator:
           type != 1 && const {1, 2, 6}.contains(r['participantType']),
       archived: r['isArchived'] == true,
+      // Servers too old to archive don't send the field at all.
+      canArchive: r.containsKey('isArchived'),
+      muted: r['notificationLevel'] == 3,
+      remoteServer: r['remoteServer'] as String? ?? '',
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -89,6 +99,35 @@ class Room {
   final bool canLeave;
   final bool isModerator;
   final bool archived;
+  final bool canArchive;
+  final bool muted;
+
+  /// Where a federated conversation really lives, or empty for a local one.
+  final String remoteServer;
+  bool get isFederated => remoteServer.isNotEmpty;
+}
+
+/// What the dock badge counts: conversations the user chose to quiet by
+/// archiving or muting would otherwise keep it lit forever.
+int dockUnread(Iterable<Room> rooms) => rooms
+    .where((r) => !r.archived && !r.muted)
+    .fold(0, (sum, r) => sum + r.unread);
+
+/// An invitation to a conversation on another server.
+class FederationInvite {
+  FederationInvite(this.id, this.roomName, this.inviter, this.server);
+
+  factory FederationInvite.fromJson(Map<String, dynamic> j) => FederationInvite(
+    j['id'] as int,
+    j['roomName'] as String? ?? '?',
+    j['inviterDisplayName'] as String? ?? j['inviterCloudId'] as String? ?? '?',
+    j['remoteServerUrl'] as String? ?? '',
+  );
+
+  final int id;
+  final String roomName;
+  final String inviter;
+  final String server;
 }
 
 class SignalingSettings {
@@ -99,6 +138,23 @@ class SignalingSettings {
   String? get userId => raw['userId'] as String?;
   Map<String, dynamic>? get helloV2 =>
       (raw['helloAuthParams'] as Map?)?['2.0']?.cast<String, dynamic>();
+
+  /// The room block's extra part when the conversation lives on another
+  /// server, or null for a local one. Mirrors the official web client.
+  Map<String, dynamic>? get federationJoin {
+    final f = raw['federation'];
+    if (f is! Map || (f['server'] as String? ?? '').isEmpty) return null;
+    final server = (f['nextcloudServer'] as String).replaceAll(
+      RegExp(r'/+$'),
+      '',
+    );
+    return {
+      'signaling': f['server'],
+      'url': '$server/ocs/v2.php/apps/spreed/api/v3/signaling/backend',
+      'roomid': f['roomId'],
+      'token': f['helloAuthParams']?['token'],
+    };
+  }
 
   /// One entry per URL, because the plugin copies them into a fixed array of
   /// 8 on desktop and only reads a plain string `url` reliably.
@@ -218,6 +274,31 @@ class NcApi implements CallSource, ChatSource {
   /// Removes only this user. The conversation carries on for everyone else.
   Future<void> leaveConversation(String token) =>
       _ocs('DELETE', '$_talkV4/room/$token/participants/self');
+
+  /// Only this user's view changes. The conversation carries on for others.
+  Future<void> setArchived(String token, bool archived) => _ocs(
+    archived ? 'POST' : 'DELETE',
+    '$_talkV4/room/$token/archive',
+  );
+
+  static const _invitesPath = '/ocs/v2.php/apps/spreed/api/v1/federation/invitation';
+
+  /// Pending invitations only; the server also lists accepted ones.
+  Future<List<FederationInvite>> federationInvites() async {
+    final data = await _ocs('GET', _invitesPath);
+    return [
+      for (final i in data as List)
+        if (i['state'] == 0)
+          FederationInvite.fromJson((i as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  Future<void> acceptInvite(int id) => _ocs('POST', '$_invitesPath/$id');
+  Future<void> declineInvite(int id) => _ocs('DELETE', '$_invitesPath/$id');
+
+  /// Ends this device's sign-in. Only for when Tala has stopped using it.
+  Future<void> revokeAppPassword() =>
+      _ocs('DELETE', '/ocs/v2.php/core/apppassword');
 
   /// Called with each fresh list of chat notifications.
   void Function(List<ChatNote> notes)? onChatNotes;
@@ -550,7 +631,10 @@ class NcApi implements CallSource, ChatSource {
 /// Nextcloud Login Flow v2: the user approves in their browser and the server
 /// issues an app password for this device. Passwords never pass through Tala.
 /// The caller stores the result.
-Future<Credentials> loginFlow(String server) async {
+Future<Credentials> loginFlow(
+  String server, {
+  bool Function()? isCancelled,
+}) async {
   final base = server.replaceAll(RegExp(r'/+$'), '');
   final http = HttpClient()..userAgent = 'Tala desktop prototype';
   try {
@@ -568,6 +652,7 @@ Future<Credentials> loginFlow(String server) async {
     final deadline = DateTime.now().add(const Duration(minutes: 20));
     while (DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(seconds: 2));
+      if (isCancelled?.call() == true) throw LoginCancelled();
       final p = await http.postUrl(Uri.parse(endpoint));
       p.headers.contentType =
           ContentType('application', 'x-www-form-urlencoded');

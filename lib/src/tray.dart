@@ -28,6 +28,15 @@ class AppTray {
 
   Future<void> show() => _call('show');
 
+  int? _badge;
+
+  /// The count on the dock icon. Zero removes it.
+  Future<void> setBadge(int count) async {
+    if (count == _badge) return;
+    _badge = count;
+    await _call('badge', count);
+  }
+
   /// Asks to close the window, the same way its close button does.
   Future<void> close() => _call('close');
 
@@ -40,9 +49,9 @@ class AppTray {
     }
   }
 
-  Future<void> _call(String method) async {
+  Future<void> _call(String method, [Object? args]) async {
     try {
-      await _channel.invokeMethod<void>(method);
+      await _channel.invokeMethod<void>(method, args);
     } on MissingPluginException {
       // No tray code on this platform yet.
     } catch (e) {

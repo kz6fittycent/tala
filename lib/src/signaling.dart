@@ -55,8 +55,16 @@ class Signaling {
         'mcu=${features.contains('mcu')}');
   }
 
-  Future<void> joinRoom(String token, String ncSession) async {
-    await _request('room', {'roomid': token, 'sessionid': ncSession});
+  Future<void> joinRoom(
+    String token,
+    String ncSession, {
+    Map<String, dynamic>? federation,
+  }) async {
+    await _request('room', {
+      'roomid': token,
+      'sessionid': ncSession,
+      'federation': ?federation,
+    });
     log('signaling: joined room');
   }
 

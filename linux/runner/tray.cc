@@ -95,6 +95,29 @@ static void autostart_toggled_cb(GtkCheckMenuItem* item, gpointer user_data) {
                                     user_data);
 }
 
+// The dock's count, through the signal docks listen to. A snap has a different
+// desktop file name, so this URI has to change there, and it needs the unity7
+// plug. A dock can only show this if it's showing Tala's icon.
+static void set_badge(Tray* tray, gint64 count) {
+  GDBusConnection* bus =
+      g_application_get_dbus_connection(G_APPLICATION(tray->application));
+  if (bus == nullptr) return;
+  GVariantBuilder props;
+  g_variant_builder_init(&props, G_VARIANT_TYPE("a{sv}"));
+  g_variant_builder_add(&props, "{sv}", "count", g_variant_new_int64(count));
+  g_variant_builder_add(&props, "{sv}", "count-visible",
+                        g_variant_new_boolean(count > 0));
+  g_autoptr(GError) error = nullptr;
+  if (!g_dbus_connection_emit_signal(
+          bus, nullptr, "/io/github/kz6fittycent/tala/launcher",
+          "com.canonical.Unity.LauncherEntry", "Update",
+          g_variant_new("(sa{sv})", "application://" APPLICATION_ID ".desktop",
+                        &props),
+          &error)) {
+    g_warning("Could not update the dock count: %s", error->message);
+  }
+}
+
 static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
                            gpointer user_data) {
   Tray* tray = static_cast<Tray*>(user_data);
@@ -106,6 +129,12 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
   } else if (g_strcmp0(method, "close") == 0) {
     // The same path as the window's close button.
     gtk_window_close(tray->window);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "badge") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_INT) {
+      set_badge(tray, fl_value_get_int(args));
+    }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (g_strcmp0(method, "available") == 0) {
     g_autoptr(FlValue) value = fl_value_new_bool(tray_is_available(tray));

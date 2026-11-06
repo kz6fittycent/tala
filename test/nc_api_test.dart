@@ -66,6 +66,15 @@ class Server {
         stored[path] = body;
         r.statusCode = 201;
       }
+    } else if (path.endsWith('/federation/invitation')) {
+      _ocs(r, [
+        {'id': 1, 'state': 0, 'roomName': 'Pending'},
+        {'id': 2, 'state': 1, 'roomName': 'Already accepted'},
+      ]);
+    } else if (path.contains('/federation/invitation/') ||
+        path.endsWith('/archive') ||
+        path.endsWith('/core/apppassword')) {
+      _ocs(r, {});
     } else if (path.contains('/participants/self')) {
       _ocs(r, {});
     } else if (path.contains('/reaction/')) {
@@ -164,5 +173,31 @@ void main() {
   test('fetches preview bytes', () async {
     expect(await api.chatPreview(7), [1, 2, 3]);
     expect(s.requests.single.contains('fileId=7'), isTrue);
+  });
+
+  test('archiving and unarchiving use the same path', () async {
+    await api.setArchived('tok', true);
+    await api.setArchived('tok', false);
+    expect(s.requests, [
+      'POST /ocs/v2.php/apps/spreed/api/v4/room/tok/archive',
+      'DELETE /ocs/v2.php/apps/spreed/api/v4/room/tok/archive',
+    ]);
+  });
+
+  test('only pending invitations are offered', () async {
+    final invites = await api.federationInvites();
+    expect(invites.map((i) => i.roomName), ['Pending']);
+  });
+
+  test('answering an invitation names it', () async {
+    await api.acceptInvite(1);
+    await api.declineInvite(2);
+    const path = '/ocs/v2.php/apps/spreed/api/v1/federation/invitation';
+    expect(s.requests, ['POST $path/1', 'DELETE $path/2']);
+  });
+
+  test('removing the app password uses the core endpoint', () async {
+    await api.revokeAppPassword();
+    expect(s.requests.single, 'DELETE /ocs/v2.php/core/apppassword');
   });
 }

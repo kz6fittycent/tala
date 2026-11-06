@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
-import 'package:tala/src/list_prefs.dart';
+import 'package:tala/src/app_info.dart';
+import 'package:tala/src/app_menu.dart';
+import 'package:tala/src/settings.dart';
 import 'package:tala/src/nc_api.dart';
 
 ChatMessage msg(int id,
@@ -124,7 +126,7 @@ class FakeSource implements ChatSource {
 Future<void> settle() => Future<void>.delayed(Duration.zero);
 
 /// Never the user's real settings file.
-ListPrefs tempPrefs() => ListPrefs(
+AppSettings tempPrefs() => AppSettings(
   file: File('${Directory.systemTemp.createTempSync('tala').path}/s.json'),
 );
 
@@ -827,7 +829,8 @@ void main() {
             onSelect: (_) {},
             onRefresh: () {},
             onRemove: (r) => removed = r,
-            listPrefs: tempPrefs(),
+            onArchive: (_) {},
+            settings: tempPrefs(),
             conversation: null,
           ),
         ),
@@ -850,7 +853,8 @@ void main() {
             onSelect: (_) {},
             onRefresh: () {},
             onRemove: (r) => removed = r,
-            listPrefs: tempPrefs(),
+            onArchive: (_) {},
+            settings: tempPrefs(),
             conversation: null,
           ),
         ),
@@ -889,7 +893,8 @@ void main() {
                 onSelect: (_) {},
                 onRefresh: () {},
                 onRemove: (_) {},
-                listPrefs: tempPrefs(),
+                onArchive: (_) {},
+            settings: tempPrefs(),
                 conversation:
                     withConversation ? const Text('conversation') : null,
               ),
@@ -916,13 +921,184 @@ void main() {
       expect(find.text('conversation'), findsOneWidget);
     });
 
+    group('menu', () {
+      Widget app(AppSettings settings, {ValueChanged<Credentials>? changed}) =>
+          MaterialApp(
+            home: Scaffold(
+              appBar: AppBar(
+                actions: [
+                  AppMenu(
+                    settings: settings,
+                    creds: Credentials('https://cloud.example/nc', 'me', 'pw'),
+                    onChangeAccount: changed ?? (_) {},
+                  ),
+                ],
+              ),
+            ),
+          );
+
+      Future<void> open(WidgetTester tester) async {
+        await tester.tap(find.byTooltip('Menu'));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('shows the account and sets the theme', (tester) async {
+        wide(tester);
+        final settings = tempPrefs();
+        await tester.pumpWidget(app(settings));
+        await open(tester);
+        expect(find.text('me'), findsOneWidget);
+        expect(find.text('cloud.example/nc'), findsOneWidget);
+        await tester.tap(find.text('Dark'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(settings.themeMode, ThemeMode.dark);
+      });
+
+      testWidgets('About states the license and independence', (tester) async {
+        wide(tester);
+        await tester.pumpWidget(app(tempPrefs()));
+        await open(tester);
+        await tester.tap(find.text('About Tala'));
+        await tester.pumpAndSettle();
+        expect(find.text('Version $appVersion'), findsOneWidget);
+        expect(find.textContaining('Affero'), findsOneWidget);
+        expect(find.textContaining('not affiliated'), findsOneWidget);
+      });
+
+      testWidgets('changing server asks for a sign-in and starts on the old one',
+          (tester) async {
+        wide(tester);
+        await tester.pumpWidget(app(tempPrefs()));
+        await open(tester);
+        await tester.tap(find.text('me'));
+        await tester.pumpAndSettle();
+        expect(find.text('Server: cloud.example/nc'), findsOneWidget);
+        await tester.tap(find.text('Change server…'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'https://cloud.example/nc',
+        );
+      });
+
+      testWidgets('a finished sign-in hands over the new account',
+          (tester) async {
+        Credentials? got;
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: SignInForm(
+              onSignedIn: (c) => got = c,
+              signIn: (url, {isCancelled}) async =>
+                  Credentials(url, 'new', 'pw2'),
+            ),
+          ),
+        ));
+        await tester.enterText(find.byType(TextField), 'other.example/ ');
+        await tester.tap(find.text('Sign in'));
+        await tester.pump();
+        expect(got?.server, 'https://other.example');
+      });
+
+      testWidgets('a sign-in can be cancelled', (tester) async {
+        final never = Completer<Credentials>();
+        Credentials? got;
+        bool Function()? check;
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: SignInForm(
+              onSignedIn: (c) => got = c,
+              signIn: (url, {isCancelled}) {
+                check = isCancelled;
+                return never.future;
+              },
+            ),
+          ),
+        ));
+        await tester.enterText(find.byType(TextField), 'other.example');
+        await tester.tap(find.text('Sign in'));
+        await tester.pump();
+        await tester.tap(find.text('Cancel sign-in'));
+        await tester.pump();
+        expect(check!(), isTrue);
+        expect(find.text('Sign in'), findsOneWidget);
+        never.complete(Credentials('x', 'y', 'z'));
+        await tester.pump();
+        expect(got, isNull);
+      });
+
+      test('the version shown matches pubspec.yaml', () {
+        final pubspec = File('pubspec.yaml').readAsStringSync();
+        expect(pubspec, contains('version: $appVersion+'));
+      });
+    });
+
+    group('federation', () {
+      test('a room knows where it lives', () {
+        final room = Room.fromJson({
+          'token': 't',
+          'type': 2,
+          'remoteServer': 'https://far.example',
+        });
+        expect(room.isFederated, isTrue);
+        expect(Room.fromJson({'token': 't', 'type': 2}).isFederated, isFalse);
+      });
+
+      test('a call in a federated room joins with the remote details', () {
+        final join = SignalingSettings({
+          'federation': {
+            'server': 'wss://sig.far.example/',
+            'nextcloudServer': 'https://far.example/',
+            'roomId': 'remote-token',
+            'helloAuthParams': {'token': 'jwt'},
+          },
+        }).federationJoin;
+        expect(join, {
+          'signaling': 'wss://sig.far.example/',
+          'url': 'https://far.example/ocs/v2.php/apps/spreed/api/v3/signaling/backend',
+          'roomid': 'remote-token',
+          'token': 'jwt',
+        });
+        expect(SignalingSettings({'federation': null}).federationJoin, isNull);
+        expect(SignalingSettings({}).federationJoin, isNull);
+      });
+
+      testWidgets('invitations offer accept and decline', (tester) async {
+        final invite = FederationInvite.fromJson({
+          'id': 4,
+          'roomName': 'Far room',
+          'inviterDisplayName': 'Sam',
+          'remoteServerUrl': 'https://far.example',
+        });
+        FederationInvite? accepted, declined;
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: InviteBanners(
+              invites: [invite],
+              onAccept: (i) => accepted = i,
+              onDecline: (i) => declined = i,
+            ),
+          ),
+        ));
+        expect(find.text('Far room'), findsOneWidget);
+        expect(find.textContaining('far.example'), findsOneWidget);
+        await tester.tap(find.text('Decline'));
+        expect(declined?.id, 4);
+        await tester.tap(find.text('Accept'));
+        expect(accepted?.id, 4);
+      });
+    });
+
     group('archived conversations', () {
-      Widget list(ListPrefs prefs, {String? selected}) => MaterialApp(
+      Room? archivedRoom;
+      setUp(() => archivedRoom = null);
+
+      Widget list(AppSettings prefs, {String? selected}) => MaterialApp(
         home: Scaffold(
           body: RoomList(
             rooms: [
-              Room('a', 'Family', false, 2),
-              Room('b', 'Old project', false, 2, archived: true, unread: 3),
+              Room('a', 'Family', false, 2, canArchive: true),
+              Room('b', 'Old project', false, 2,
+                  archived: true, canArchive: true, unread: 3),
               Room('c', 'Talk updates', false, 4, archived: true),
             ],
             error: null,
@@ -930,7 +1106,13 @@ void main() {
             onSelect: (_) {},
             onRefresh: () {},
             onRemove: (_) {},
-            prefs: prefs,
+            onArchive: (r) => archivedRoom = r,
+            settings: prefs,
+            menu: AppMenu(
+              settings: prefs,
+              creds: Credentials('https://cloud.example/nc', 'me', 'pw'),
+              onChangeAccount: (_) {},
+            ),
           ),
         ),
       );
@@ -959,18 +1141,18 @@ void main() {
           (tester) async {
         final prefs = tempPrefs()..archivedOpen = true;
         await tester.pumpWidget(list(prefs));
-        await tester.tap(find.byTooltip('List options'));
+        await tester.tap(find.byTooltip('Menu'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byType(CheckedPopupMenuItem<String>));
+        await tester.tap(find.text('Show archived'), warnIfMissed: false);
         await tester.pumpAndSettle();
         expect(prefs.hideArchived, isTrue);
         expect(find.text('Archived (2)'), findsNothing);
         expect(find.text('Old project'), findsNothing);
         expect(find.text('Family'), findsOneWidget);
 
-        await tester.tap(find.byTooltip('List options'));
+        await tester.tap(find.byTooltip('Menu'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byType(CheckedPopupMenuItem<String>));
+        await tester.tap(find.text('Show archived'), warnIfMissed: false);
         await tester.pumpAndSettle();
         expect(prefs.hideArchived, isFalse);
         expect(find.text('Archived (2)'), findsOneWidget);
@@ -987,11 +1169,37 @@ void main() {
               onSelect: (_) {},
               onRefresh: () {},
               onRemove: (_) {},
-              prefs: tempPrefs(),
+              onArchive: (_) {},
+              settings: tempPrefs(),
             ),
           ),
         ));
         expect(find.textContaining('Archived'), findsNothing);
+      });
+
+      testWidgets('a conversation can be archived and unarchived from its menu',
+          (tester) async {
+        final prefs = tempPrefs()..archivedOpen = true;
+        await tester.pumpWidget(list(prefs));
+        await openMenu(tester, 'Family');
+        await tester.tap(find.text('Archive'));
+        await tester.pumpAndSettle();
+        expect(archivedRoom?.token, 'a');
+
+        await openMenu(tester, 'Old project');
+        await tester.tap(find.text('Unarchive'));
+        await tester.pumpAndSettle();
+        expect(archivedRoom?.token, 'b');
+      });
+
+      test('a server without the flag gets no archive option', () {
+        final old = Room.fromJson({'token': 't', 'type': 2});
+        expect(old.canArchive, isFalse);
+        expect(
+          Room.fromJson({'token': 't', 'type': 2, 'isArchived': false})
+              .canArchive,
+          isTrue,
+        );
       });
 
       test('the server flag is read, and missing means not archived', () {
@@ -1005,18 +1213,32 @@ void main() {
         expect(Room.fromJson(json({})).archived, isFalse);
       });
 
+      test('the dock count skips archived and muted conversations', () {
+        expect(
+          dockUnread([
+            Room('a', 'A', false, 2, unread: 2),
+            Room('b', 'B', false, 2, unread: 5, archived: true),
+            Room('c', 'C', false, 2, unread: 9, muted: true),
+            Room('d', 'D', false, 1, unread: 1),
+          ]),
+          3,
+        );
+      });
+
       test('the choices survive a restart, and a bad file is ignored', () {
         final file = File(
           '${Directory.systemTemp.createTempSync('tala').path}/s.json',
         );
-        ListPrefs(file: file)
+        AppSettings(file: file)
           ..hideArchived = true
-          ..archivedOpen = true;
-        final again = ListPrefs(file: file);
+          ..archivedOpen = true
+          ..themeMode = ThemeMode.dark;
+        final again = AppSettings(file: file);
         expect(again.hideArchived, isTrue);
         expect(again.archivedOpen, isTrue);
+        expect(again.themeMode, ThemeMode.dark);
         file.writeAsStringSync('not json');
-        expect(ListPrefs(file: file).hideArchived, isFalse);
+        expect(AppSettings(file: file).hideArchived, isFalse);
       });
     });
   });

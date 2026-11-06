@@ -114,7 +114,12 @@ class Call extends ChangeNotifier {
       if (!_sig.features.contains('mcu')) {
         log('call: server hello did not list mcu');
       }
-      await _sig.joinRoom(room.token, ncSession);
+      final federation = _settings.federationJoin;
+      if (federation != null && !_sig.features.contains('federation')) {
+        throw StateError('This server\'s signaling server can\'t join calls '
+            'hosted on another server. It may need updating.');
+      }
+      await _sig.joinRoom(room.token, ncSession, federation: federation);
       await api.joinCall(room.token, _flagInCall | _flagAudio | _flagVideo);
       _joinedCall = true;
       await _publish();

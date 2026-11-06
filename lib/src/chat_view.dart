@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'chat.dart';
-import 'list_prefs.dart';
 import 'log.dart';
 import 'nc_api.dart';
+import 'settings.dart';
 
 /// Below this the two panes don't both fit, so one shows at a time. Larger
 /// text never hides the conversation list while there's room for it.
@@ -40,8 +40,11 @@ class ChatLayout extends StatelessWidget {
     required this.onSelect,
     required this.onRefresh,
     required this.onRemove,
-    required this.listPrefs,
+    required this.onArchive,
+    required this.settings,
     required this.conversation,
+    this.menu,
+    this.banner,
   });
 
   final List<Room>? rooms;
@@ -50,8 +53,11 @@ class ChatLayout extends StatelessWidget {
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
   final ValueChanged<Room> onRemove;
-  final ListPrefs listPrefs;
+  final ValueChanged<Room> onArchive;
+  final AppSettings settings;
   final Widget? conversation;
+  final Widget? menu;
+  final Widget? banner;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -63,7 +69,10 @@ class ChatLayout extends StatelessWidget {
         onSelect: onSelect,
         onRefresh: onRefresh,
         onRemove: onRemove,
-        prefs: listPrefs,
+        onArchive: onArchive,
+        settings: settings,
+        menu: menu,
+        banner: banner,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -92,7 +101,10 @@ class RoomList extends StatelessWidget {
     required this.onSelect,
     required this.onRefresh,
     required this.onRemove,
-    required this.prefs,
+    required this.onArchive,
+    required this.settings,
+    this.menu,
+    this.banner,
   });
 
   final List<Room>? rooms;
@@ -101,18 +113,22 @@ class RoomList extends StatelessWidget {
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
   final ValueChanged<Room> onRemove;
-  final ListPrefs prefs;
+  final ValueChanged<Room> onArchive;
+  final AppSettings settings;
+  final Widget? menu;
+  final Widget? banner;
 
   Widget _tile(Room room) => _RoomTile(
     room: room,
     selected: room.token == selected,
     onTap: () => onSelect(room.token),
     onRemove: () => onRemove(room),
+    onArchive: () => onArchive(room),
   );
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: prefs,
+    listenable: settings,
     builder: (context, _) => _build(context),
   );
 
@@ -120,8 +136,8 @@ class RoomList extends StatelessWidget {
     final items = rooms;
     final active = [...?items?.where((r) => !r.archived)];
     final archived = [...?items?.where((r) => r.archived)];
-    final showArchived = archived.isNotEmpty && !prefs.hideArchived;
-    final archivedOpen = showArchived && prefs.archivedOpen;
+    final showArchived = archived.isNotEmpty && !settings.hideArchived;
+    final archivedOpen = showArchived && settings.archivedOpen;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -140,21 +156,11 @@ class RoomList extends StatelessWidget {
                 icon: const Icon(Icons.refresh),
                 onPressed: onRefresh,
               ),
-              PopupMenuButton<String>(
-                tooltip: 'List options',
-                icon: const Icon(Icons.more_vert),
-                onSelected: (_) => prefs.hideArchived = !prefs.hideArchived,
-                itemBuilder: (context) => [
-                  CheckedPopupMenuItem(
-                    value: 'archived',
-                    checked: !prefs.hideArchived,
-                    child: const Text('Show archived'),
-                  ),
-                ],
-              ),
+              ?menu,
             ],
           ),
         ),
+        ?banner,
         if (error != null && items != null)
           const _Banner('Can\'t reach the server. Retrying…'),
         Expanded(
@@ -175,7 +181,7 @@ class RoomList extends StatelessWidget {
                       return _ArchivedHeader(
                         rooms: archived,
                         open: archivedOpen,
-                        onTap: () => prefs.archivedOpen = !prefs.archivedOpen,
+                        onTap: () => settings.archivedOpen = !settings.archivedOpen,
                       );
                     }
                     return _tile(archived[i - active.length - 1]);
@@ -230,14 +236,21 @@ class _RoomTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onRemove,
+    required this.onArchive,
   });
   final Room room;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onRemove;
+  final VoidCallback onArchive;
 
   Future<void> _menu(BuildContext context, Offset at) async {
     final choice = await _showMenuAt<String>(context, at, [
+      if (room.canArchive)
+        PopupMenuItem(
+          value: 'archive',
+          child: Text(room.archived ? 'Unarchive' : 'Archive'),
+        ),
       PopupMenuItem(
         value: 'remove',
         enabled: room.canLeave,
@@ -249,6 +262,7 @@ class _RoomTile extends StatelessWidget {
       ),
     ]);
     if (choice == 'remove') onRemove();
+    if (choice == 'archive') onArchive();
   }
 
   String get _preview {
@@ -280,6 +294,14 @@ class _RoomTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (room.isFederated)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Tooltip(
+                  message: 'Hosted on ${_hostOf(room.remoteServer)}',
+                  child: Icon(Icons.public, size: 16, color: scheme.outline),
+                ),
+              ),
             if (room.hasCall)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
@@ -315,6 +337,68 @@ class _RoomTile extends StatelessWidget {
       ),
     );
   }
+}
+
+String _hostOf(String url) {
+  final host = Uri.tryParse(url)?.host ?? '';
+  return host.isEmpty ? url : host;
+}
+
+/// Invitations to conversations on other servers, above the list.
+class InviteBanners extends StatelessWidget {
+  const InviteBanners({
+    super.key,
+    required this.invites,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final List<FederationInvite> invites;
+  final ValueChanged<FederationInvite> onAccept;
+  final ValueChanged<FederationInvite> onDecline;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final invite in invites)
+        Card(
+          margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  invite.roomName,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'Invited by ${invite.inviter} on ${_hostOf(invite.server)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => onDecline(invite),
+                      child: const Text('Decline'),
+                    ),
+                    TextButton(
+                      onPressed: () => onAccept(invite),
+                      child: const Text('Accept'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 Future<T?> _showMenuAt<T>(
@@ -419,7 +503,10 @@ class _ConversationPaneState extends State<ConversationPane> {
       if (_editing == null) widget.drafts[widget.room.token] = _input.text;
     });
     widget.source.chatUploadsAllowed().then((allowed) {
-      if (mounted) setState(() => _canUpload = allowed);
+      // Talk has no attachments in federated conversations.
+      if (mounted) {
+        setState(() => _canUpload = allowed && !widget.room.isFederated);
+      }
     }, onError: (Object e) => log('chat: attachment settings: $e'));
   }
 
