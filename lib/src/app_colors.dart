@@ -43,13 +43,77 @@ class AvatarColors extends ThemeExtension<AvatarColors> {
       : this;
 }
 
+/// Backgrounds as lightness steps. The stock ones run from nearly black to
+/// nearly white, which is harsh on the eyes either way. These are soft grays
+/// with a trace of the accent's hue.
+const _darkLevels = (
+  dim: .13,
+  surface: .15,
+  lowest: .12,
+  low: .17,
+  container: .19,
+  high: .22,
+  highest: .26,
+  bright: .28,
+);
+const _lightLevels = (
+  dim: .84,
+  surface: .93,
+  lowest: .96,
+  low: .94,
+  container: .91,
+  high: .89,
+  highest: .86,
+  bright: .96,
+);
+
+ColorScheme _softened(ColorScheme s, Accent accent) {
+  final dark = s.brightness == Brightness.dark;
+  final levels = dark ? _darkLevels : _lightLevels;
+  final hue = HSLColor.fromColor(accent.color).hue;
+  Color gray(double lightness) =>
+      HSLColor.fromAHSL(1, hue, dark ? .07 : .10, lightness).toColor();
+  // Own message bubbles. Their text uses the normal text color, which the
+  // fidelity variant's saturated container is too close to.
+  final bubble = HSLColor.fromAHSL(
+    1,
+    hue,
+    dark ? .40 : .55,
+    dark ? .27 : .82,
+  ).toColor();
+  // Selected rows have to stand out from the softer list behind them.
+  final selection = HSLColor.fromAHSL(
+    1,
+    hue,
+    dark ? .22 : .35,
+    dark ? .25 : .83,
+  ).toColor();
+  return s.copyWith(
+    primaryContainer: bubble,
+    onPrimaryContainer: s.onSurface,
+    secondaryContainer: selection,
+    onSecondaryContainer: s.onSurface,
+    surface: gray(levels.surface),
+    surfaceDim: gray(levels.dim),
+    surfaceBright: gray(levels.bright),
+    surfaceContainerLowest: gray(levels.lowest),
+    surfaceContainerLow: gray(levels.low),
+    surfaceContainer: gray(levels.container),
+    surfaceContainerHigh: gray(levels.high),
+    surfaceContainerHighest: gray(levels.highest),
+  );
+}
+
 /// The fidelity variant stays on the accent's hue. The default one tints a blue
 /// app's secondary colors purple.
 ThemeData talaTheme(Accent accent, Brightness brightness) => ThemeData(
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: accent.color,
-    brightness: brightness,
-    dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+  colorScheme: _softened(
+    ColorScheme.fromSeed(
+      seedColor: accent.color,
+      brightness: brightness,
+      dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+    ),
+    accent,
   ),
   extensions: [AvatarColors(accent.color)],
 );

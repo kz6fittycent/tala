@@ -83,18 +83,6 @@ static gboolean set_autostart(gboolean enabled) {
   return g_key_file_save_to_file(file, path, nullptr);
 }
 
-static void autostart_toggled_cb(GtkCheckMenuItem* item, gpointer user_data) {
-  gboolean wanted = gtk_check_menu_item_get_active(item);
-  if (set_autostart(wanted)) return;
-  g_warning("Could not change the start at login setting");
-  // Show the real state, without coming back through this handler.
-  g_signal_handlers_block_by_func(item, (gpointer)autostart_toggled_cb,
-                                  user_data);
-  gtk_check_menu_item_set_active(item, !wanted);
-  g_signal_handlers_unblock_by_func(item, (gpointer)autostart_toggled_cb,
-                                    user_data);
-}
-
 // The dock's count, through the signal docks listen to. A snap has a different
 // desktop file name, so this URI has to change there, and it needs the unity7
 // plug. A dock can only show this if it's showing Tala's icon.
@@ -136,6 +124,18 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
       set_badge(tray, fl_value_get_int(args));
     }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "getAutostart") == 0) {
+    g_autofree gchar* path = autostart_path();
+    g_autoptr(FlValue) value =
+        fl_value_new_bool(g_file_test(path, G_FILE_TEST_EXISTS));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+  } else if (g_strcmp0(method, "setAutostart") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    gboolean changed = args != nullptr &&
+                       fl_value_get_type(args) == FL_VALUE_TYPE_BOOL &&
+                       set_autostart(fl_value_get_bool(args));
+    g_autoptr(FlValue) value = fl_value_new_bool(changed);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
   } else if (g_strcmp0(method, "available") == 0) {
     g_autoptr(FlValue) value = fl_value_new_bool(tray_is_available(tray));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
@@ -171,15 +171,6 @@ Tray* tray_new(GtkApplication* application, GtkWindow* window, FlView* view) {
   g_signal_connect(open_item, "activate", G_CALLBACK(open_activated_cb), tray);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), open_item);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-  GtkWidget* autostart_item =
-      gtk_check_menu_item_new_with_label("Start at login");
-  g_autofree gchar* autostart_file = autostart_path();
-  gtk_check_menu_item_set_active(
-      GTK_CHECK_MENU_ITEM(autostart_item),
-      g_file_test(autostart_file, G_FILE_TEST_EXISTS));
-  g_signal_connect(autostart_item, "toggled", G_CALLBACK(autostart_toggled_cb),
-                   tray);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu), autostart_item);
   GtkWidget* quit_item = gtk_menu_item_new_with_label("Quit Tala");
   g_signal_connect(quit_item, "activate", G_CALLBACK(quit_activated_cb), tray);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), quit_item);

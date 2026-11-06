@@ -6,6 +6,7 @@ import 'chat_view.dart';
 import 'log.dart';
 import 'nc_api.dart';
 import 'settings.dart';
+import 'tray.dart';
 
 /// Host and any port or subfolder, for showing to people.
 String serverLabel(String server) {
@@ -116,9 +117,18 @@ class _SignInFormState extends State<SignInForm> {
   );
 }
 
-enum _MenuChoice { account, appearance, sound, archived, help, about, support }
+enum _MenuChoice {
+  account,
+  appearance,
+  sound,
+  archived,
+  startAtLogin,
+  help,
+  about,
+  support,
+}
 
-class AppMenu extends StatelessWidget {
+class AppMenu extends StatefulWidget {
   const AppMenu({
     super.key,
     required this.settings,
@@ -129,6 +139,37 @@ class AppMenu extends StatelessWidget {
   final AppSettings settings;
   final Credentials creds;
   final ValueChanged<Credentials> onChangeAccount;
+
+  @override
+  State<AppMenu> createState() => _AppMenuState();
+}
+
+class _AppMenuState extends State<AppMenu> {
+  AppSettings get settings => widget.settings;
+  Credentials get creds => widget.creds;
+
+  /// Null hides the choice, on platforms without it.
+  bool? _startAtLogin;
+
+  @override
+  void initState() {
+    super.initState();
+    AppTray.startAtLogin().then((enabled) {
+      if (mounted) setState(() => _startAtLogin = enabled);
+    });
+  }
+
+  Future<void> _toggleStartAtLogin() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final wanted = !(_startAtLogin ?? false);
+    if (await AppTray.setStartAtLogin(wanted)) {
+      if (mounted) setState(() => _startAtLogin = wanted);
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Couldn\'t change start at login.')),
+      );
+    }
+  }
 
   PopupMenuItem<_MenuChoice> _item(
     _MenuChoice value,
@@ -149,7 +190,7 @@ class AppMenu extends StatelessWidget {
         showDialog<void>(
           context: context,
           builder: (_) =>
-              AccountDialog(creds: creds, onChangeAccount: onChangeAccount),
+              AccountDialog(creds: creds, onChangeAccount: widget.onChangeAccount),
         );
       case _MenuChoice.appearance:
         showDialog<void>(
@@ -160,6 +201,8 @@ class AppMenu extends StatelessWidget {
         settings.messageSound = !settings.messageSound;
       case _MenuChoice.archived:
         settings.hideArchived = !settings.hideArchived;
+      case _MenuChoice.startAtLogin:
+        _toggleStartAtLogin();
       case _MenuChoice.help:
         openExternal(wikiUrl);
       case _MenuChoice.about:
@@ -201,6 +244,12 @@ class AppMenu extends StatelessWidget {
         checked: !settings.hideArchived,
         child: const Text('Show archived'),
       ),
+      if (_startAtLogin != null)
+        CheckedPopupMenuItem(
+          value: _MenuChoice.startAtLogin,
+          checked: _startAtLogin!,
+          child: const Text('Start at login'),
+        ),
       const PopupMenuDivider(),
       _item(_MenuChoice.help, Icons.help_outline, 'Help'),
       _item(_MenuChoice.about, Icons.info_outline, 'About Tala'),

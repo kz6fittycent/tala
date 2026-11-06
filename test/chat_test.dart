@@ -960,6 +960,49 @@ void main() {
         expect(settings.accent.name, 'teal');
       });
 
+      testWidgets('start at login shows the real state and changes it',
+          (tester) async {
+        wide(tester);
+        const channel = MethodChannel('tala/tray');
+        var enabled = true;
+        final messenger =
+            tester.binding.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getAutostart') return enabled;
+          if (call.method == 'setAutostart') {
+            enabled = call.arguments as bool;
+            return true;
+          }
+          return null;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+        await tester.pumpWidget(app(tempPrefs()));
+        await tester.pump();
+        await open(tester);
+        expect(
+          tester
+              .widget<CheckedPopupMenuItem<dynamic>>(find.ancestor(
+                of: find.text('Start at login'),
+                matching: find.byWidgetPredicate(
+                    (w) => w is CheckedPopupMenuItem),
+              ))
+              .checked,
+          isTrue,
+        );
+        await tester.tap(find.text('Start at login'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(enabled, isFalse);
+      });
+
+      testWidgets('start at login is hidden where it is not built',
+          (tester) async {
+        wide(tester);
+        await tester.pumpWidget(app(tempPrefs()));
+        await tester.pump();
+        await open(tester);
+        expect(find.text('Start at login'), findsNothing);
+      });
+
       testWidgets('the message sound can be turned off', (tester) async {
         wide(tester);
         final settings = tempPrefs();
@@ -1057,6 +1100,44 @@ void main() {
           // Large bold text needs 3:1; only the icon's blue is under 4.5:1.
           expect(whiteContrast(a.color), greaterThan(a == accents.first ? 4 : 4.5),
               reason: a.name);
+        }
+      });
+
+      double contrast(Color a, Color b) {
+        final la = a.computeLuminance(), lb = b.computeLuminance();
+        return (la > lb ? la + .05 : lb + .05) / (la > lb ? lb + .05 : la + .05);
+      }
+
+      test('backgrounds are soft, and everything on them stays readable', () {
+        for (final a in accents) {
+          for (final b in Brightness.values) {
+            final s = talaTheme(a, b).colorScheme;
+            final name = '${a.name} ${b.name}';
+            final l = HSLColor.fromColor(s.surface).lightness;
+            if (b == Brightness.dark) {
+              expect(l, greaterThan(.12), reason: 'too black: $name');
+            } else {
+              expect(l, lessThan(.96), reason: 'too glaring: $name');
+            }
+            for (final bg in [
+              s.surface,
+              s.surfaceContainerHigh,
+              s.surfaceContainerHighest,
+            ]) {
+              expect(contrast(s.onSurface, bg), greaterThan(7), reason: name);
+              expect(contrast(s.onSurfaceVariant, bg), greaterThan(4.5),
+                  reason: name);
+            }
+            expect(contrast(s.primary, s.surface), greaterThan(4.5),
+                reason: name);
+            expect(contrast(s.onSurface, s.secondaryContainer), greaterThan(4.5),
+                reason: name);
+            expect(contrast(s.onSurface, s.primaryContainer), greaterThan(4.5),
+                reason: 'own message bubble: $name');
+            // A selected row has to be visible against the list.
+            expect(contrast(s.secondaryContainer, s.surface), greaterThan(1.15),
+                reason: 'selected row: $name');
+          }
         }
       });
 

@@ -182,7 +182,8 @@ class RoomList extends StatelessWidget {
                       return _ArchivedHeader(
                         rooms: archived,
                         open: archivedOpen,
-                        onTap: () => settings.archivedOpen = !settings.archivedOpen,
+                        onTap: () =>
+                            settings.archivedOpen = !settings.archivedOpen,
                       );
                     }
                     return _tile(archived[i - active.length - 1]);
@@ -668,43 +669,41 @@ class _ConversationPaneState extends State<ConversationPane> {
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Material(
-            elevation: 1,
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                children: [
-                  if (!twoPane)
-                    IconButton(
-                      tooltip: 'Back to conversations',
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: widget.onBack,
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      room.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                if (!twoPane)
+                  IconButton(
+                    tooltip: 'Back to conversations',
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: widget.onBack,
                   ),
-                  if (room.canCall)
-                    room.hasCall
-                        ? FilledButton.icon(
-                            icon: const Icon(Icons.call),
-                            label: const Text('Join call'),
-                            onPressed: widget.onCall,
-                          )
-                        : IconButton(
-                            tooltip: 'Start a call',
-                            icon: const Icon(Icons.call),
-                            onPressed: widget.onCall,
-                          ),
-                ],
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    room.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                if (room.canCall)
+                  room.hasCall
+                      ? FilledButton.icon(
+                          icon: const Icon(Icons.call),
+                          label: const Text('Join call'),
+                          onPressed: widget.onCall,
+                        )
+                      : IconButton(
+                          tooltip: 'Start a call',
+                          icon: const Icon(Icons.call),
+                          onPressed: widget.onCall,
+                        ),
+              ],
             ),
           ),
+          const Divider(height: 1),
           if (_thread.problem != null) _Banner(_thread.problem!),
           Expanded(child: _body(context)),
           if (room.canChat && !_thread.gone) ...[

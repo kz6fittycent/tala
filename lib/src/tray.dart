@@ -40,6 +40,30 @@ class AppTray {
   /// Asks to close the window, the same way its close button does.
   Future<void> close() => _call('close');
 
+  /// Whether Tala starts at login, or null where that isn't built yet.
+  static Future<bool?> startAtLogin() async {
+    try {
+      return await _channel.invokeMethod<bool>('getAutostart');
+    } on MissingPluginException {
+      return null;
+    } catch (e) {
+      log('tray: reading start at login failed: $e');
+      return null;
+    }
+  }
+
+  /// Returns whether the change was made.
+  static Future<bool> setStartAtLogin(bool enabled) async {
+    try {
+      return await _channel.invokeMethod<bool>('setAutostart', enabled) ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (e) {
+      log('tray: changing start at login failed: $e');
+      return false;
+    }
+  }
+
   /// Whether a tray host is showing the icon.
   Future<bool> available() async {
     try {
