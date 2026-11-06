@@ -1,0 +1,16 @@
+import 'dart:io';
+
+/// Prototype logger. Never pass passwords, tickets or SDP to this.
+final File _file = () {
+  final dir = Directory('${Platform.environment['HOME']}/.config/tala-prototype')
+    ..createSync(recursive: true);
+  final current = File('${dir.path}/log.txt');
+  if (current.existsSync()) current.copySync('${dir.path}/log.previous.txt');
+  return current..writeAsStringSync('');
+}();
+
+void log(String message) {
+  final line = '${DateTime.now().toIso8601String().substring(11, 23)} $message';
+  stdout.writeln(line);
+  _file.writeAsStringSync('$line\n', mode: FileMode.append);
+}
