@@ -103,9 +103,13 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
   if (g_strcmp0(method, "show") == 0) {
     show_window(tray);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
-  } else if (g_strcmp0(method, "hide") == 0) {
-    gtk_widget_hide(GTK_WIDGET(tray->window));
+  } else if (g_strcmp0(method, "close") == 0) {
+    // The same path as the window's close button.
+    gtk_window_close(tray->window);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "available") == 0) {
+    g_autoptr(FlValue) value = fl_value_new_bool(tray_is_available(tray));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }

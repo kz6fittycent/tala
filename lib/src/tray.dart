@@ -27,7 +27,18 @@ class AppTray {
   void stop() => _channel.setMethodCallHandler(null);
 
   Future<void> show() => _call('show');
-  Future<void> hide() => _call('hide');
+
+  /// Asks to close the window, the same way its close button does.
+  Future<void> close() => _call('close');
+
+  /// Whether a tray host is showing the icon.
+  Future<bool> available() async {
+    try {
+      return await _channel.invokeMethod<bool>('available') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
   Future<void> _call(String method) async {
     try {

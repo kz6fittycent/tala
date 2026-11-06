@@ -63,6 +63,10 @@ static void my_application_activate(GApplication* application) {
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   self->window = window;
 
+  // Must connect before the Flutter view exists. The view adds its own handler
+  // that asks the app to exit and stops later handlers from running.
+  g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
+
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
   // desktop).
@@ -114,7 +118,6 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   self->tray = tray_new(GTK_APPLICATION(application), window, view);
-  g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
   if (self->start_hidden) {
     g_timeout_add_seconds(kTrayWaitSeconds, tray_wait_cb, self);
   }

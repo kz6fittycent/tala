@@ -7,7 +7,7 @@ import 'package:flutter/scheduler.dart';
 import 'log.dart';
 import 'tray.dart';
 
-/// Hides and reshows the window, checking that Dart keeps running while hidden
+/// Closes and reshows the window, checking that Dart keeps running while hidden
 /// and that drawing resumes afterward. Run with `tala --tray-selftest`.
 class TraySelfTest extends StatefulWidget {
   const TraySelfTest({super.key});
@@ -36,7 +36,8 @@ class _TraySelfTestState extends State<TraySelfTest> {
     await Future<void>.delayed(wait);
     log('tray test: visible, frames $_frames, ticks $_ticks');
     final framesBefore = _frames;
-    await _tray.hide();
+    log('tray test: tray available ${await _tray.available()}');
+    await _tray.close();
     final ticksAtHide = _ticks;
     await Future<void>.delayed(wait);
     final ranHidden = _ticks - ticksAtHide;
