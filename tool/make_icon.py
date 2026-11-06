@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generates Tala's icons into assets/icon. Needs numpy and Pillow.
 
-The app icon is a weathered Ansuz cut into flat blue. Small sizes use a plain
-rough rune, because texture doesn't survive there.
+The icon is a white Ansuz with rough chiseled edges on flat blue. Small sizes
+use a less rough outline, which stays clean when scaled down.
 """
 import random
 import sys
@@ -13,22 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 S = 1024
 BLUE = (0, 130, 201)
-PAINT = (226, 226, 214)
-
-
-def noise(seed, octaves):
-    r = np.random.default_rng(seed)
-    out = np.zeros((S, S))
-    for n, a in octaves:
-        g = (r.random((n, n)) * 255).astype("uint8")
-        out += a * np.asarray(Image.fromarray(g).resize((S, S), Image.BICUBIC), float) / 255
-    out -= out.min()
-    return out / out.max()
-
-
-def blur(a, radius):
-    im = Image.fromarray((np.clip(a, 0, 1) * 255).astype("uint8"))
-    return np.asarray(im.filter(ImageFilter.GaussianBlur(radius)), float) / 255
+WHITE = (255, 255, 255)
 
 
 def cut(d, a, b, wa, wb, rng, rough):
@@ -85,22 +70,9 @@ def rounded_alpha():
 
 
 def carved():
-    mask = rune_mask(rough=5)
-    field = np.ones((S, S, 3)) * np.array(BLUE, float)
-    m = mask[..., None]
-    grit = noise(31, ((64, 0.5), (128, 0.7), (256, 0.9), (512, 0.7)))[..., None]
-    # V-groove: two facets meeting along the centre of each cut.
-    gy, gx = np.gradient(blur(mask, 16))
-    facet = np.clip((gx + gy) * 26, -1, 1)[..., None]
-    floor = np.array(PAINT, float) * (0.74 + 0.34 * (grit - 0.5)) * (1 + facet * 0.42)
-    # Old paint: dirt and the surface show through in patches.
-    wear = noise(32, ((32, 0.6), (64, 0.8), (128, 0.8), (256, 0.6)))[..., None]
-    worn = np.clip((wear - 0.56) * 3.2, 0, 0.78)
-    floor = floor * (1 - worn) + field * 0.62 * worn
-    out = field * (1 - m) + floor * m
-    # Only the cut's own lip is shaded, so the surround stays flat blue.
-    ly, lx = np.gradient(blur(mask, 3))
-    out *= 1 + np.clip((lx + ly) * -5.5, -0.5, 0.55)[..., None]
+    """Plain white on flat blue: anything duller gets lost on a busy desktop."""
+    mask = rune_mask(rough=5)[..., None]
+    out = np.array(BLUE, float) * (1 - mask) + np.array(WHITE, float) * mask
     rgba = np.dstack([np.clip(out, 0, 255), rounded_alpha() * 255]).astype("uint8")
     return Image.fromarray(rgba, "RGBA")
 

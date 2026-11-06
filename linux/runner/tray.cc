@@ -1,5 +1,8 @@
 #include "tray.h"
 
+#include <glib/gstdio.h>
+#include <string.h>
+
 // libayatana-appindicator marks its GTK3 API deprecated in favor of a newer
 // library that distributions don't ship widely yet.
 #pragma GCC diagnostic push
@@ -52,6 +55,46 @@ static void quit_activated_cb(GtkMenuItem* item, gpointer user_data) {
                                   quit_response_cb, tray);
 }
 
+static gchar* autostart_path() {
+  g_autofree gchar* name = g_strconcat(APPLICATION_ID, ".desktop", nullptr);
+  return g_build_filename(g_get_user_config_dir(), "autostart", name, nullptr);
+}
+
+// Writes or removes the login entry. Returns whether the entry now matches.
+static gboolean set_autostart(gboolean enabled) {
+  g_autofree gchar* path = autostart_path();
+  if (!enabled) {
+    return g_unlink(path) == 0 || !g_file_test(path, G_FILE_TEST_EXISTS);
+  }
+  g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
+  if (exe == nullptr) return FALSE;
+  g_autofree gchar* dir = g_path_get_dirname(path);
+  if (g_mkdir_with_parents(dir, 0700) != 0) return FALSE;
+  // Double quotes keep a path with spaces in one piece; these characters would
+  // need escaping inside them, so refuse rather than write a broken entry.
+  if (strpbrk(exe, "\"`$\\") != nullptr) return FALSE;
+  g_autofree gchar* exec = g_strdup_printf("\"%s\" --background", exe);
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  const gchar* group = G_KEY_FILE_DESKTOP_GROUP;
+  g_key_file_set_string(file, group, "Type", "Application");
+  g_key_file_set_string(file, group, "Name", "Tala");
+  g_key_file_set_string(file, group, "Exec", exec);
+  g_key_file_set_string(file, group, "Terminal", "false");
+  return g_key_file_save_to_file(file, path, nullptr);
+}
+
+static void autostart_toggled_cb(GtkCheckMenuItem* item, gpointer user_data) {
+  gboolean wanted = gtk_check_menu_item_get_active(item);
+  if (set_autostart(wanted)) return;
+  g_warning("Could not change the start at login setting");
+  // Show the real state, without coming back through this handler.
+  g_signal_handlers_block_by_func(item, (gpointer)autostart_toggled_cb,
+                                  user_data);
+  gtk_check_menu_item_set_active(item, !wanted);
+  g_signal_handlers_unblock_by_func(item, (gpointer)autostart_toggled_cb,
+                                    user_data);
+}
+
 static void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
                            gpointer user_data) {
   Tray* tray = static_cast<Tray*>(user_data);
@@ -95,6 +138,15 @@ Tray* tray_new(GtkApplication* application, GtkWindow* window, FlView* view) {
   g_signal_connect(open_item, "activate", G_CALLBACK(open_activated_cb), tray);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), open_item);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+  GtkWidget* autostart_item =
+      gtk_check_menu_item_new_with_label("Start at login");
+  g_autofree gchar* autostart_file = autostart_path();
+  gtk_check_menu_item_set_active(
+      GTK_CHECK_MENU_ITEM(autostart_item),
+      g_file_test(autostart_file, G_FILE_TEST_EXISTS));
+  g_signal_connect(autostart_item, "toggled", G_CALLBACK(autostart_toggled_cb),
+                   tray);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), autostart_item);
   GtkWidget* quit_item = gtk_menu_item_new_with_label("Quit Tala");
   g_signal_connect(quit_item, "activate", G_CALLBACK(quit_activated_cb), tray);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), quit_item);

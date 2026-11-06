@@ -13,12 +13,18 @@ struct _MyApplication {
   char** dart_entrypoint_arguments;
   GtkWindow* window;
   Tray* tray;
+  // Started at login: stay in the tray rather than opening a window.
+  gboolean start_hidden;
 };
+
+// How long a hidden start waits for a tray host before showing the window.
+static const guint kTrayWaitSeconds = 20;
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
+  if (self->start_hidden) return;
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
@@ -30,6 +36,16 @@ static gboolean delete_event_cb(GtkWidget* widget, GdkEvent* event,
   if (self->tray == nullptr || !tray_is_available(self->tray)) return FALSE;
   gtk_widget_hide(widget);
   return TRUE;
+}
+
+// A hidden window with no tray icon would be unreachable.
+static gboolean tray_wait_cb(gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (!tray_is_available(self->tray)) {
+    g_warning("No tray host appeared, so showing the window");
+    gtk_widget_show(GTK_WIDGET(self->window));
+  }
+  return G_SOURCE_REMOVE;
 }
 
 // Implements GApplication::activate.
@@ -99,6 +115,9 @@ static void my_application_activate(GApplication* application) {
 
   self->tray = tray_new(GTK_APPLICATION(application), window, view);
   g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
+  if (self->start_hidden) {
+    g_timeout_add_seconds(kTrayWaitSeconds, tray_wait_cb, self);
+  }
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -112,7 +131,11 @@ static gboolean my_application_local_command_line(GApplication* application,
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
 
   // Developer modes such as --selftest run on their own, beside a running copy.
-  if (g_strv_length(self->dart_entrypoint_arguments) > 0) {
+  guint arg_count = g_strv_length(self->dart_entrypoint_arguments);
+  self->start_hidden =
+      arg_count == 1 &&
+      g_strcmp0(self->dart_entrypoint_arguments[0], "--background") == 0;
+  if (arg_count > 0 && !self->start_hidden) {
     g_application_set_flags(application, G_APPLICATION_NON_UNIQUE);
   }
 
@@ -123,7 +146,10 @@ static gboolean my_application_local_command_line(GApplication* application,
     return TRUE;
   }
 
-  g_application_activate(application);
+  // A login start must not pop open a copy that's already running.
+  if (!(self->start_hidden && g_application_get_is_remote(application))) {
+    g_application_activate(application);
+  }
   *exit_status = 0;
 
   return TRUE;
