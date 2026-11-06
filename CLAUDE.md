@@ -1,6 +1,6 @@
 # Tala
 
-Renamed from Sema on 2026-11-04: the snap name `sema` was taken. The user registered `tala` (Old Norse "to speak"). The S icon in assets/icon must be redone. Older notes below say Sema.
+Renamed from Sema on 2026-11-04: the snap name `sema` was taken. The user registered `tala` (Old Norse "to speak"). Older notes below say Sema.
 
 Unofficial snap of the official Nextcloud Talk desktop client (nextcloud/talk-desktop). It repackages Nextcloud's unmodified Linux ZIP. There is no app code here: to change app behavior, contribute upstream.
 
@@ -62,6 +62,12 @@ Own local git repo on `main`, no remote. Nothing pushed. Prebuilt libwebrtc is l
 ## Chat, first slice (built 2026-11-06, user confirmed sending and receiving both ways)
 `lib/src/chat.dart` holds the model and `ChatThread` (long poll, paging, sending, read marker); `lib/src/chat_view.dart` holds the screens, with no new dependencies. Conversations and chat sit side by side down to 720 wide, then one pane at a time. Tapping a conversation now opens chat; calls start from its header. Reads never move the read marker: only `chatMarkRead` does, and only while the app reports resumed. `tala --chat-check` is a read-only server check that logs counts and message kinds, never names or text. It parsed 292 real messages with no failures. Unit and widget tests pass with a fake server. Not sent or marked read against the real server by me.
 Not built: Markdown, avatars, message search, tray, upload progress and cancel, drag and drop, editing or deleting messages. Call join/left system messages all show, which may be noisy. Focus: Linux does report it; the log showed `app: inactive` and `app: resumed` changing during use on 2026-11-06.
+
+## Icon (chosen by the user 2026-11-06)
+A weathered Tiwaz (T rune) cut into flat blue `#0082C9`. `tool/make_icon.py` generates `assets/icon/tala.png` and `tala-512.png`, plus flat `tala-small-*.png` for tray and small sizes, because texture is lost below about 32px. Not yet wired into the window, tray or a desktop file. The user chose it knowing Tiwaz is in the ADL hate symbol database as the "Tyr rune" (Nazi and neo-Nazi use; ADL says judge by context, and neopagans use it too); expect this to come up on public release. Ask Nextcloud about the shared blue along with the other trademark question.
+
+## Tray (proposed, awaiting the user's OK)
+Plan: native code in `linux/runner` using libayatana-appindicator (needs `libayatana-appindicator3-dev`, and a snap must ship the library), no pub packages. `tray_manager` and `window_manager` moved onto the young `nativeapi` in late 2026 with several releases a week; `system_tray` was last released in April 2023.
 
 ## Chat, second slice (built 2026-11-06)
 User confirmed on the real server 2026-11-06: replies, reactions, uploads, image previews, and a desktop popup appearing when unfocused and clearing when the conversation is opened. Not confirmed: no popup while the conversation is open and focused.
