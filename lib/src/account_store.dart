@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 
@@ -60,90 +59,29 @@ class KeyringSecretStore implements SecretStore {
   Future<void> delete(String item) => _call<void>('delete', {'item': item});
 }
 
-/// Keeps the signed-in account in the keyring. Also moves an account across
-/// from the prototype's plain file, which is removed only once the keyring has
-/// been read back and matches.
+/// Keeps the signed-in account in the keyring.
 class AccountStore {
-  AccountStore({SecretStore? secrets, File? legacyFile})
-    : _secrets = secrets ?? KeyringSecretStore(),
-      _legacy = legacyFile ??
-          File(
-            '${Platform.environment['HOME']}'
-            '/.config/tala-prototype/credentials.json',
-          );
+  AccountStore({SecretStore? secrets})
+    : _secrets = secrets ?? KeyringSecretStore();
 
   final SecretStore _secrets;
-  final File _legacy;
 
   static const _item = 'account';
   static const _label = 'Tala account';
 
   /// The saved account, or null if there is none. Throws [KeyringException] if
-  /// the keyring can't answer and there's no old file to fall back on.
+  /// the keyring can't answer.
   Future<Credentials?> load() async {
-    final String? stored;
-    try {
-      stored = await _secrets.read(_item);
-    } on KeyringException catch (e) {
-      final old = _readLegacy();
-      if (old == null) rethrow;
-      log('account: keyring unavailable, using the old file for now: '
-          '${e.message}');
-      return old;
-    }
-    if (stored != null) {
-      final creds = _decode(stored);
-      if (creds != null) {
-        _deleteLegacy();
-        return creds;
-      }
-      log('account: the keyring entry could not be read');
-    }
-    final old = _readLegacy();
-    if (old != null) await _migrate(old);
-    return old;
+    final stored = await _secrets.read(_item);
+    if (stored == null) return null;
+    final creds = _decode(stored);
+    if (creds == null) log('account: the keyring entry could not be read');
+    return creds;
   }
 
   /// Throws [KeyringException] if it couldn't be stored.
   Future<void> save(Credentials creds) =>
       _secrets.write(_item, _label, _encode(creds));
-
-  Future<void> _migrate(Credentials creds) async {
-    final encoded = _encode(creds);
-    try {
-      await _secrets.write(_item, _label, encoded);
-      if (await _secrets.read(_item) != encoded) {
-        log('account: keyring read-back did not match, keeping the old file');
-        return;
-      }
-    } on KeyringException catch (e) {
-      log('account: moving to the keyring failed, keeping the old file: '
-          '${e.message}');
-      return;
-    }
-    _deleteLegacy();
-    log('account: moved to the keyring');
-  }
-
-  Credentials? _readLegacy() {
-    try {
-      if (!_legacy.existsSync()) return null;
-      final creds = _decode(_legacy.readAsStringSync());
-      if (creds == null) log('account: the old file could not be read');
-      return creds;
-    } on FileSystemException catch (e) {
-      log('account: the old file could not be read: ${e.osError?.message}');
-      return null;
-    }
-  }
-
-  void _deleteLegacy() {
-    try {
-      if (_legacy.existsSync()) _legacy.deleteSync();
-    } on FileSystemException catch (e) {
-      log('account: removing the old file failed: ${e.osError?.message}');
-    }
-  }
 
   static String _encode(Credentials c) => jsonEncode({
     'server': c.server,

@@ -83,8 +83,8 @@ class Call extends ChangeNotifier {
       await localRenderer.initialize();
       _settings = await api.signalingSettings(room.token);
       if (_settings.server.isEmpty) {
-        throw StateError('This server has no signaling server. '
-            'The prototype only supports servers that have one.');
+        throw StateError('Calls need a server with Nextcloud\'s High '
+            'Performance Backend, and this one doesn\'t have it yet.');
       }
       _state('Opening camera and mic');
       _local = await navigator.mediaDevices.getUserMedia({
@@ -256,7 +256,7 @@ class Call extends ChangeNotifier {
         case 'offer':
           if (from == null || payload == null) return;
           if (roomType != 'video') {
-            log('subscriber: ignoring $roomType stream in the prototype');
+            log('subscriber: ignoring $roomType stream');
             return;
           }
           await _subscribe(from, data['sid'] as String, payload['sdp'] as String);

@@ -13,6 +13,7 @@ class Server {
   final Set<String> folders = {};
   final List<String?> ifNoneMatch = [];
   final List<String> bodies = [];
+  bool rejectAll = false;
 
   Future<void> start() async {
     http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -29,6 +30,11 @@ class Server {
     final path = Uri.decodeFull(q.uri.path);
     requests.add('${q.method} ${q.uri}');
     final body = await q.fold<List<int>>([], (a, b) => a..addAll(b));
+    if (rejectAll) {
+      r.statusCode = 401;
+      await r.close();
+      return;
+    }
     if (path.endsWith('/cloud/capabilities')) {
       _ocs(r, {
         'capabilities': {
@@ -66,6 +72,15 @@ class Server {
         stored[path] = body;
         r.statusCode = 201;
       }
+    } else if (path.endsWith('/autocomplete/get')) {
+      _ocs(r, [
+        {'id': 'sam', 'label': 'Sam', 'source': 'users', 'subline': 'Sales'},
+        {'id': 'user id', 'label': 'Me', 'source': 'users'},
+        {'id': 'staff', 'label': 'Staff', 'source': 'groups'},
+      ]);
+    } else if (path.endsWith('/spreed/api/v4/room') && q.method == 'POST') {
+      bodies.add(utf8.decode(body));
+      _ocs(r, {'token': 'new-room'});
     } else if (path.endsWith('/federation/invitation')) {
       _ocs(r, [
         {'id': 1, 'state': 0, 'roomName': 'Pending'},
@@ -199,5 +214,43 @@ void main() {
   test('removing the app password uses the core endpoint', () async {
     await api.revokeAppPassword();
     expect(s.requests.single, 'DELETE /ocs/v2.php/core/apppassword');
+  });
+
+  test('people search keeps other users, not groups or yourself', () async {
+    final people = await api.searchPeople('s a');
+    expect(people.map((p) => p.id), ['sam']);
+    expect(people.single.detail, 'Sales');
+    expect(s.requests.first, contains('search=s+a'));
+    expect(s.requests.first, contains('itemType=call'));
+  });
+
+  test('starting a conversation asks for a one-to-one', () async {
+    expect(await api.startOneToOne('sam'), 'new-room');
+    expect(jsonDecode(s.bodies.single), {'roomType': 1, 'invite': 'sam'});
+  });
+
+  test('only a 401 counts as a rejected sign-in', () async {
+    expect(await api.signInRejected(), isFalse);
+    s.rejectAll = true;
+    expect(await api.signInRejected(), isTrue);
+    await s.http.close(force: true);
+    expect(await api.signInRejected(), isFalse);
+    await s.start();
+  });
+
+  test('the server sees the version, not "prototype"', () async {
+    final seen = <String?>[];
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((q) async {
+      seen.add(q.headers.value('user-agent'));
+      q.response.write('{"ocs":{"data":{}}}');
+      await q.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+    await NcApi(
+      Credentials('http://127.0.0.1:${server.port}', 'u', 'p'),
+    ).signInRejected();
+    expect(seen.single, startsWith('Tala/'));
+    expect(seen.single, isNot(contains('prototype')));
   });
 }

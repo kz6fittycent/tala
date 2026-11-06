@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'app_info.dart';
 import 'chat.dart';
 import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
+
+/// Also the device name the server lists for Tala's app password.
+const _userAgent = 'Tala/$appVersion';
 
 /// Thrown when the user abandons a sign-in that's waiting on the browser.
 class LoginCancelled implements Exception {}
@@ -113,6 +117,14 @@ int dockUnread(Iterable<Room> rooms) => rooms
     .where((r) => !r.archived && !r.muted)
     .fold(0, (sum, r) => sum + r.unread);
 
+/// Someone found on the server.
+class Person {
+  Person(this.id, this.name, this.detail);
+  final String id;
+  final String name;
+  final String detail;
+}
+
 /// An invitation to a conversation on another server.
 class FederationInvite {
   FederationInvite(this.id, this.roomName, this.inviter, this.server);
@@ -185,7 +197,7 @@ class SignalingSettings {
 class NcApi implements CallSource, ChatSource {
   NcApi(this.creds);
   final Credentials creds;
-  final HttpClient _http = HttpClient()..userAgent = 'Tala desktop prototype';
+  final HttpClient _http = HttpClient()..userAgent = _userAgent;
   final Map<String, Cookie> _cookies = {};
 
   static const _talkV4 = '/ocs/v2.php/apps/spreed/api/v4';
@@ -295,6 +307,50 @@ class NcApi implements CallSource, ChatSource {
 
   Future<void> acceptInvite(int id) => _ocs('POST', '$_invitesPath/$id');
   Future<void> declineInvite(int id) => _ocs('DELETE', '$_invitesPath/$id');
+
+  /// People to start a conversation with. Never includes the user themselves.
+  Future<List<Person>> searchPeople(String query) async {
+    final search = Uri.encodeQueryComponent(query);
+    final data = await _ocs(
+      'GET',
+      '/ocs/v2.php/core/autocomplete/get?search=$search'
+      '&itemType=call&itemId=new&shareTypes%5B%5D=0&limit=20',
+    );
+    final self = await _uid();
+    return [
+      for (final p in data as List)
+        if (p['source'] == 'users' && p['id'] != self)
+          Person(
+            p['id'] as String,
+            (p['label'] ?? p['id']) as String,
+            (p['subline'] ?? p['shareWithDisplayNameUnique'] ?? '') as String,
+          ),
+    ];
+  }
+
+  /// Returns the conversation's token. The server gives back the existing one
+  /// if these two already have a conversation.
+  Future<String> startOneToOne(String userId) async {
+    final d = await _ocs(
+      'POST',
+      '$_talkV4/room',
+      body: {'roomType': 1, 'invite': userId},
+    );
+    return (d as Map)['token'] as String;
+  }
+
+  /// Whether the server has stopped accepting this app password, as opposed to
+  /// one request being refused or the network being down.
+  Future<bool> signInRejected() async {
+    try {
+      await _ocs('GET', '/ocs/v2.php/cloud/user');
+      return false;
+    } on ApiException catch (e) {
+      return e.status == 401;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Ends this device's sign-in. Only for when Tala has stopped using it.
   Future<void> revokeAppPassword() =>
@@ -574,6 +630,8 @@ class NcApi implements CallSource, ChatSource {
   /// kinds, never names or text.
   Future<void> chatCheck() async {
     final rooms = await this.rooms();
+    log('check: people search found '
+        '${(await searchPeople('a')).length}');
     log('check: ${rooms.length} conversations, '
         '${rooms.where((r) => r.archived).length} archived, '
         '${rooms.where((r) => r.lastMessage != null).length} with a last message, '
@@ -636,7 +694,7 @@ Future<Credentials> loginFlow(
   bool Function()? isCancelled,
 }) async {
   final base = server.replaceAll(RegExp(r'/+$'), '');
-  final http = HttpClient()..userAgent = 'Tala desktop prototype';
+  final http = HttpClient()..userAgent = _userAgent;
   try {
     final init = await http.postUrl(Uri.parse('$base/index.php/login/v2'));
     final res = await init.close();

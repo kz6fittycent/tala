@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs the prototype under gdb and saves a backtrace if it crashes.
-out="$HOME/.config/tala-prototype/crash.txt"
+# Runs Tala under gdb and saves a backtrace if it crashes.
+out="$HOME/.config/tala/crash.txt"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cat > "$out.cmds" <<GDB
 set pagination off

@@ -12,6 +12,7 @@ import 'package:tala/src/app_info.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/settings.dart';
 import 'package:tala/src/nc_api.dart';
+import 'package:tala/src/new_conversation.dart';
 
 ChatMessage msg(int id,
         {String text = 'hi',
@@ -1089,6 +1090,96 @@ void main() {
       test('the version shown matches pubspec.yaml', () {
         final pubspec = File('pubspec.yaml').readAsStringSync();
         expect(pubspec, contains('version: $appVersion+'));
+      });
+    });
+
+    group('new conversation', () {
+      Future<Person?> run(
+        WidgetTester tester,
+        Future<List<Person>> Function(String) search,
+        Future<void> Function() act,
+      ) async {
+        Person? chosen;
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  chosen = await showDialog<Person>(
+                    context: context,
+                    builder: (_) => NewConversationDialog(search: search),
+                  );
+                },
+                child: const Text('go'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('go'));
+        await tester.pumpAndSettle();
+        await act();
+        return chosen;
+      }
+
+      testWidgets('searches after a pause and returns who was picked',
+          (tester) async {
+        final queries = <String>[];
+        final chosen = await run(tester, (q) async {
+          queries.add(q);
+          return [Person('sam', 'Sam Rivers', 'Sales')];
+        }, () async {
+          await tester.enterText(find.byType(TextField), 'sa');
+          await tester.pump(const Duration(milliseconds: 100));
+          await tester.enterText(find.byType(TextField), 'sam');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+          expect(queries, ['sam'], reason: 'one search, for the final text');
+          await tester.tap(find.text('Sam Rivers'));
+          await tester.pumpAndSettle();
+        });
+        expect(chosen?.id, 'sam');
+      });
+
+      testWidgets('says when nobody matches or the search fails',
+          (tester) async {
+        var fail = false;
+        await run(tester, (q) async {
+          if (fail) throw ApiException(500, 'p');
+          return const [];
+        }, () async {
+          await tester.enterText(find.byType(TextField), 'zzz');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+          expect(find.text('No one found.'), findsOneWidget);
+          fail = true;
+          await tester.enterText(find.byType(TextField), 'zzzz');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+          expect(find.textContaining('Couldn\'t search'), findsOneWidget);
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+        });
+      });
+
+      testWidgets('an older, slower search cannot replace a newer one',
+          (tester) async {
+        final slow = Completer<List<Person>>();
+        await run(tester, (q) {
+          if (q == 'a') return slow.future;
+          return Future.value([Person('b', 'Newer', '')]);
+        }, () async {
+          await tester.enterText(find.byType(TextField), 'a');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.enterText(find.byType(TextField), 'b');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+          slow.complete([Person('a', 'Older', '')]);
+          await tester.pumpAndSettle();
+          expect(find.text('Newer'), findsOneWidget);
+          expect(find.text('Older'), findsNothing);
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+        });
       });
     });
 

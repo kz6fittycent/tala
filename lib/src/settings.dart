@@ -5,16 +5,14 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 import 'log.dart';
+import 'paths.dart';
 
 /// Choices that belong to this computer. None of this goes to the server, so
 /// other devices and the user's archive are unaffected.
 class AppSettings extends ChangeNotifier {
   AppSettings({File? file})
     : _file = file ??
-          File(
-            '${Platform.environment['HOME']}'
-            '/.config/tala-prototype/settings.json',
-          ) {
+          File('${configDir.path}/settings.json') {
     _load();
   }
 

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'src/account_store.dart';
 import 'src/app_colors.dart';
+import 'src/app_info.dart';
 import 'src/app_menu.dart';
 import 'src/call.dart';
 import 'src/chat.dart';
@@ -19,6 +20,7 @@ import 'src/desktop_notify.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
+import 'src/new_conversation.dart';
 import 'src/ringer.dart';
 import 'src/settings.dart';
 import 'src/tray.dart';
@@ -27,7 +29,7 @@ import 'src/selftest.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  log('Tala prototype starting');
+  log('Tala $appVersion starting');
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(
       const ['Tala'],
@@ -146,6 +148,9 @@ class _StartPageState extends State<StartPage> {
   bool _loading = true;
   NcApi? _api;
   KeyringException? _problem;
+
+  /// Set when the server stopped accepting the saved sign-in.
+  String? _expiredServer;
   bool _slow = false;
   Timer? _slowTimer;
 
@@ -159,6 +164,17 @@ class _StartPageState extends State<StartPage> {
   void dispose() {
     _slowTimer?.cancel();
     super.dispose();
+  }
+
+  /// Polling with a rejected password would get Tala locked out by the server's
+  /// brute force protection, so this stops everything and asks the user.
+  void _signInExpired() {
+    log('account: the server rejected the sign-in');
+    AppTray().show();
+    setState(() {
+      _expiredServer = _api?.creds.server;
+      _api = null;
+    });
   }
 
   /// Used for a first sign-in and for moving to another server.
@@ -189,6 +205,7 @@ class _StartPageState extends State<StartPage> {
     // new page takes over the tray.
     setState(() {
       _api = null;
+      _expiredServer = null;
       _loading = true;
     });
     await WidgetsBinding.instance.endOfFrame;
@@ -300,6 +317,10 @@ class _StartPageState extends State<StartPage> {
         ),
       );
     }
+    final expired = _expiredServer;
+    if (expired != null) {
+      return SignInExpiredPage(server: expired, onSignedIn: _useAccount);
+    }
     final api = _api;
     return api == null
         ? LoginPage(onSignedIn: _useAccount)
@@ -308,6 +329,7 @@ class _StartPageState extends State<StartPage> {
             settings: widget.settings,
             startHidden: widget.startHidden,
             onChangeAccount: _useAccount,
+            onSignInExpired: _signInExpired,
           );
   }
 }
@@ -324,6 +346,42 @@ class LoginPage extends StatelessWidget {
   );
 }
 
+class SignInExpiredPage extends StatelessWidget {
+  const SignInExpiredPage({
+    super.key,
+    required this.server,
+    required this.onSignedIn,
+  });
+  final String server;
+  final ValueChanged<Credentials> onSignedIn;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Please sign in again',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${serverLabel(server)} no longer accepts Tala\'s sign-in. It '
+              'may have been revoked, or the account may have changed.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            SignInForm(initialServer: server, onSignedIn: onSignedIn),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class RoomsPage extends StatefulWidget {
   const RoomsPage({
     super.key,
@@ -331,11 +389,13 @@ class RoomsPage extends StatefulWidget {
     required this.settings,
     required this.startHidden,
     required this.onChangeAccount,
+    required this.onSignInExpired,
   });
   final NcApi api;
   final AppSettings settings;
   final bool startHidden;
   final ValueChanged<Credentials> onChangeAccount;
+  final VoidCallback onSignInExpired;
   @override
   State<RoomsPage> createState() => _RoomsPageState();
 }
@@ -419,6 +479,14 @@ class _RoomsPageState extends State<RoomsPage> {
       _updateBadge();
     } catch (e) {
       log('rooms: $e');
+      if (e is ApiException && e.status == 401) {
+        final rejected = await widget.api.signInRejected();
+        if (!mounted) return;
+        if (rejected) {
+          widget.onSignInExpired();
+          return;
+        }
+      }
       if (mounted) setState(() => _roomsError = e);
     }
   }
@@ -453,6 +521,25 @@ class _RoomsPageState extends State<RoomsPage> {
     }
     await _refreshInvites();
     await _refreshRooms();
+  }
+
+  Future<void> _newConversation() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final person = await showDialog<Person>(
+      context: context,
+      builder: (_) => NewConversationDialog(search: widget.api.searchPeople),
+    );
+    if (person == null) return;
+    try {
+      final token = await widget.api.startOneToOne(person.id);
+      await _refreshRooms();
+      _select(token);
+    } catch (e) {
+      log('rooms: starting a conversation failed: $e');
+      messenger.showSnackBar(SnackBar(
+        content: Text('Couldn\'t start a conversation with ${person.name}.'),
+      ));
+    }
   }
 
   Future<void> _setArchived(Room room, bool archived) async {
@@ -611,10 +698,20 @@ class _RoomsPageState extends State<RoomsPage> {
           onRemove: _removeRoom,
           onArchive: (room) => _setArchived(room, !room.archived),
           settings: widget.settings,
-          menu: AppMenu(
-            settings: widget.settings,
-            creds: widget.api.creds,
-            onChangeAccount: widget.onChangeAccount,
+          menu: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'New conversation',
+                icon: const Icon(Icons.add_comment_outlined),
+                onPressed: _newConversation,
+              ),
+              AppMenu(
+                settings: widget.settings,
+                creds: widget.api.creds,
+                onChangeAccount: widget.onChangeAccount,
+              ),
+            ],
           ),
           banner: _invites.isEmpty
               ? null
