@@ -56,6 +56,12 @@ Still open: no two-way call yet. Recipients don't ring: Tala joins with the same
 ## Milestone (2026-11-04)
 Two-way audio and video confirmed by the user, Tala to a browser on the same server (external signaling). The silent browser ring was on the other side (no audible ring from the official iPhone app either). Tala has no incoming-call handling yet: next major item.
 
+## Where we left off (2026-11-06)
+The user logged out to test a fresh session. First thing next time, ask how it went: Tala should start only in the tray with no window (start at login is on, pointing at this local build), and a message while hidden should pop up. If it fails, check `~/.config/tala-prototype/log.txt` and `~/.config/autostart/io.github.kz6fittycent.tala.desktop`.
+Waiting on a second tester: Decline, ring stopping when the caller hangs up or the user answers elsewhere, a long call, a call ringing a hidden window, Quit during a call, and the corrected call status.
+Also unconfirmed: no popup while the conversation is open and focused; tray Open clicked by hand; how the icon looks in the top bar and dock.
+Next proposed: move the app password to the keyring (bring the dependency decision to the user first). After that: internal signaling, snap packaging. Open decision: hide archived conversations? Nothing is pushed and there's no remote.
+
 ## Repo (2026-11-06)
 Own local git repo on `main`, no remote. Nothing pushed. Prebuilt libwebrtc is left out: the plugin's CMake downloads it at the version in `third_party/flutter_webrtc/third_party/libwebrtc_version.ini` (checksum in TALA_PATCHES.md; CMake doesn't verify it, and the build fails if that release disappears). Older notes saying "not committed" or "no git repo" are out of date.
 
