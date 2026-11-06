@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'log.dart';
+import 'ringer.dart';
 import 'nc_api.dart';
 import 'signaling.dart';
 
@@ -57,6 +58,8 @@ class Call extends ChangeNotifier {
   bool _ended = false;
   bool _joinedRoom = false;
   bool _joinedCall = false;
+  final Ringback _ringback = Ringback();
+  bool _otherArrived = false;
 
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   String state = 'Starting';
@@ -123,6 +126,8 @@ class Call extends ChangeNotifier {
       await api.joinCall(room.token, _flagInCall | _flagAudio | _flagVideo);
       _joinedCall = true;
       await _publish();
+      // Nobody was in the call and nobody has arrived, so they're being rung.
+      if (!room.hasCall && !_otherArrived && !_ended) _ringback.start();
       _state(_subs.isEmpty
           ? 'In call, waiting for others'
           : 'In call with ${_subs.length} other(s)');
@@ -194,6 +199,7 @@ class Call extends ChangeNotifier {
       final update = e['update'] as Map?;
       if (update?['all'] == true && update?['incall'] == 0) {
         log('call: ended for everyone');
+        _ringback.stop();
         for (final s in _subs.keys.toList()) {
           _dropSub(s);
         }
@@ -204,6 +210,10 @@ class Call extends ChangeNotifier {
         if (session == null || session == _sig.sessionId) continue;
         final flags = u['inCall'];
         final inCall = flags is int ? flags : (flags == true ? 1 : 0);
+        if (inCall & _flagInCall != 0) {
+          _otherArrived = true;
+          _ringback.stop();
+        }
         if (inCall & _flagInCall == 0) {
           _dropSub(session);
         } else if (inCall & (_flagAudio | _flagVideo) != 0 &&
@@ -333,6 +343,7 @@ class Call extends ChangeNotifier {
   Future<void> hangUp() async {
     if (_ended) return;
     _ended = true;
+    _ringback.stop();
     if (identical(current, this)) current = null;
     for (final t in _offerRetry.values) {
       t.cancel();

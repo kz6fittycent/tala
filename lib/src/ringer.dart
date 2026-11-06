@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,65 @@ import 'log.dart';
 @visibleForTesting
 String ringPlayer(Map<String, String> environment) =>
     environment.containsKey('SNAP') ? 'paplay' : 'pw-play';
+
+/// What a caller hears until someone answers, on the usual 2 on, 4 off cadence.
+/// Stops by itself so a call nobody answers doesn't ring forever.
+class Ringback {
+  Ringback({Future<Process> Function()? launch, Duration? gap, Duration? limit})
+    : _launch = launch ?? _play,
+      _gap = gap ?? const Duration(seconds: 4),
+      _limit = limit ?? const Duration(seconds: 60);
+
+  final Future<Process> Function() _launch;
+  final Duration _gap;
+  final Duration _limit;
+  Process? _player;
+  Timer? _limitTimer;
+  bool _started = false;
+  bool _on = false;
+
+  bool get isOn => _on;
+
+  static Future<Process> _play() => Process.start(
+    ringPlayer(Platform.environment),
+    ['${File(Platform.resolvedExecutable).parent.path}'
+        '/data/flutter_assets/assets/sounds/ringback.wav'],
+  );
+
+  /// Once per call: it doesn't start again after someone has answered and left.
+  void start() {
+    if (_started) return;
+    _started = _on = true;
+    _limitTimer = Timer(_limit, stop);
+    unawaited(_loop());
+  }
+
+  void stop() {
+    _on = false;
+    _limitTimer?.cancel();
+    _player?.kill();
+    _player = null;
+  }
+
+  Future<void> _loop() async {
+    while (_on) {
+      try {
+        final player = await _launch();
+        if (!_on) {
+          player.kill();
+          return;
+        }
+        _player = player;
+        await player.exitCode;
+      } catch (e) {
+        log('ringback: could not play sound: $e');
+        _on = false;
+        return;
+      }
+      if (_on) await Future<void>.delayed(_gap);
+    }
+  }
+}
 
 /// Linux-only for now: repeats the ring sound and shows a desktop notification.
 /// Mac and Windows need their own version of this class.

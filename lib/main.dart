@@ -26,6 +26,7 @@ import 'src/settings.dart';
 import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
+import 'src/frame_log.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +65,17 @@ Future<void> main(List<String> args) async {
     log('ring test done');
     exit(0);
   }
+  if (args.contains('--test-ringback')) {
+    final ringback = Ringback()..start();
+    await Future<void>.delayed(const Duration(seconds: 7));
+    ringback.stop();
+    log('ringback test done');
+    exit(0);
+  }
+  if (args.contains('--frame-check')) {
+    runApp(FrameCheck(done: () => exit(0)));
+    return;
+  }
   if (args.contains('--test-chime')) {
     // A real popup with the real sound, for checking the desktop plays it.
     await DesktopNotifier().show('test', 'Tala', 'Test message', sound: true);
@@ -84,6 +96,7 @@ Future<void> main(List<String> args) async {
     runApp(const TraySelfTest());
     return;
   }
+  startFrameLog();
   runApp(args.contains('--selftest')
       ? const SelfTest()
       : args.contains('--camera-cycle')
