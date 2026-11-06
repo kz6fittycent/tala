@@ -51,3 +51,4 @@ app.*.map.json
 # Prebuilt libwebrtc: downloaded by the plugin's CMake at build time
 /third_party/flutter_webrtc/third_party/downloads/
 /third_party/flutter_webrtc/third_party/libwebrtc/
+/assets/sounds/samples/

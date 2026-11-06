@@ -3,6 +3,9 @@
 
 Everything is synthesized here, so Tala owns the result outright: additive
 partials with exponential decay, soft attack, 48 kHz mono 16-bit WAV.
+
+The user chose 2-glass-steps on 2026-11-06, kept as assets/sounds/message.wav.
+The samples folder is git-ignored; run this to hear the others again.
 """
 import pathlib
 import wave

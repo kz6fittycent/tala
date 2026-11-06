@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
 import 'app_info.dart';
 import 'chat_view.dart';
 import 'log.dart';
@@ -115,7 +116,7 @@ class _SignInFormState extends State<SignInForm> {
   );
 }
 
-enum _MenuChoice { account, system, light, dark, archived, help, about, support }
+enum _MenuChoice { account, appearance, sound, archived, help, about, support }
 
 class AppMenu extends StatelessWidget {
   const AppMenu({
@@ -142,16 +143,6 @@ class AppMenu extends StatelessWidget {
     ),
   );
 
-  CheckedPopupMenuItem<_MenuChoice> _theme(
-    _MenuChoice value,
-    ThemeMode mode,
-    String label,
-  ) => CheckedPopupMenuItem(
-    value: value,
-    checked: settings.themeMode == mode,
-    child: Text(label),
-  );
-
   void _chosen(BuildContext context, _MenuChoice choice) {
     switch (choice) {
       case _MenuChoice.account:
@@ -160,12 +151,13 @@ class AppMenu extends StatelessWidget {
           builder: (_) =>
               AccountDialog(creds: creds, onChangeAccount: onChangeAccount),
         );
-      case _MenuChoice.system:
-        settings.themeMode = ThemeMode.system;
-      case _MenuChoice.light:
-        settings.themeMode = ThemeMode.light;
-      case _MenuChoice.dark:
-        settings.themeMode = ThemeMode.dark;
+      case _MenuChoice.appearance:
+        showDialog<void>(
+          context: context,
+          builder: (_) => AppearanceDialog(settings: settings),
+        );
+      case _MenuChoice.sound:
+        settings.messageSound = !settings.messageSound;
       case _MenuChoice.archived:
         settings.hideArchived = !settings.hideArchived;
       case _MenuChoice.help:
@@ -197,11 +189,13 @@ class AppMenu extends StatelessWidget {
         ),
       ),
       const PopupMenuDivider(),
-      const PopupMenuItem(enabled: false, height: 32, child: Text('Theme')),
-      _theme(_MenuChoice.system, ThemeMode.system, 'System'),
-      _theme(_MenuChoice.light, ThemeMode.light, 'Light'),
-      _theme(_MenuChoice.dark, ThemeMode.dark, 'Dark'),
+      _item(_MenuChoice.appearance, Icons.palette_outlined, 'Appearance…'),
       const PopupMenuDivider(),
+      CheckedPopupMenuItem(
+        value: _MenuChoice.sound,
+        checked: settings.messageSound,
+        child: const Text('Message sound'),
+      ),
       CheckedPopupMenuItem(
         value: _MenuChoice.archived,
         checked: !settings.hideArchived,
@@ -212,6 +206,92 @@ class AppMenu extends StatelessWidget {
       _item(_MenuChoice.about, Icons.info_outline, 'About Tala'),
       _item(_MenuChoice.support, Icons.favorite_outline, 'Support Tala'),
     ],
+  );
+}
+
+class AppearanceDialog extends StatelessWidget {
+  const AppearanceDialog({super.key, required this.settings});
+  final AppSettings settings;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: settings,
+    builder: (context, _) => AlertDialog(
+      title: const Text('Appearance'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Theme'),
+            const SizedBox(height: 8),
+            SegmentedButton<ThemeMode>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: ThemeMode.system, label: Text('System')),
+                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+              ],
+              selected: {settings.themeMode},
+              onSelectionChanged: (s) => settings.themeMode = s.single,
+            ),
+            const SizedBox(height: 20),
+            const Text('Color'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final accent in accents)
+                  _Swatch(
+                    accent: accent,
+                    selected: settings.accent.name == accent.name,
+                    onTap: () => settings.accent = accent,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+  final Accent accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: accent.label,
+    child: Tooltip(
+      message: accent.label,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: CircleAvatar(
+          radius: 22,
+          backgroundColor: accent.color,
+          foregroundColor: Colors.white,
+          child: selected ? const Icon(Icons.check) : null,
+        ),
+      ),
+    ),
   );
 }
 

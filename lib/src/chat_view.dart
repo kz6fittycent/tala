@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_colors.dart';
 import 'chat.dart';
 import 'log.dart';
 import 'nc_api.dart';
@@ -425,7 +426,14 @@ class _Initial extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ExcludeSemantics(
     child: CircleAvatar(
-      child: Text(name.isEmpty ? '?' : name.characters.first.toUpperCase()),
+      backgroundColor:
+          Theme.of(context).extension<AvatarColors>()?.background ?? talaBlue,
+      foregroundColor: Colors.white,
+      // White on the icon's blue is 4.17:1, which needs large, bold text.
+      child: Text(
+        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+      ),
     ),
   );
 }

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/settings.dart';
@@ -949,9 +950,25 @@ void main() {
         await open(tester);
         expect(find.text('me'), findsOneWidget);
         expect(find.text('cloud.example/nc'), findsOneWidget);
-        await tester.tap(find.text('Dark'), warnIfMissed: false);
+        await tester.tap(find.text('Appearance…'));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('Dark'));
+        await tester.pump();
         expect(settings.themeMode, ThemeMode.dark);
+        await tester.tap(find.byTooltip('Teal'));
+        await tester.pump();
+        expect(settings.accent.name, 'teal');
+      });
+
+      testWidgets('the message sound can be turned off', (tester) async {
+        wide(tester);
+        final settings = tempPrefs();
+        expect(settings.messageSound, isTrue);
+        await tester.pumpWidget(app(settings));
+        await open(tester);
+        await tester.tap(find.text('Message sound'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(settings.messageSound, isFalse);
       });
 
       testWidgets('About states the license and independence', (tester) async {
@@ -1029,6 +1046,72 @@ void main() {
       test('the version shown matches pubspec.yaml', () {
         final pubspec = File('pubspec.yaml').readAsStringSync();
         expect(pubspec, contains('version: $appVersion+'));
+      });
+    });
+
+    group('colors', () {
+      double whiteContrast(Color c) => 1.05 / (c.computeLuminance() + 0.05);
+
+      test('white letters are readable on every accent', () {
+        for (final a in accents) {
+          // Large bold text needs 3:1; only the icon's blue is under 4.5:1.
+          expect(whiteContrast(a.color), greaterThan(a == accents.first ? 4 : 4.5),
+              reason: a.name);
+        }
+      });
+
+      test('nothing visible drifts to purple, in either brightness', () {
+        bool purple(Color c) {
+          final hsl = HSLColor.fromColor(c);
+          return hsl.saturation > 0.12 && hsl.hue > 255 && hsl.hue < 320;
+        }
+
+        for (final a in accents) {
+          for (final b in Brightness.values) {
+            final s = talaTheme(a, b).colorScheme;
+            for (final c in [
+              s.primary,
+              s.primaryContainer,
+              s.secondary,
+              s.secondaryContainer,
+              s.surfaceContainerHigh,
+            ]) {
+              expect(purple(c), isFalse, reason: '${a.name} ${b.name} $c');
+            }
+          }
+        }
+      });
+
+      test('an unknown saved accent falls back to the icon blue', () {
+        expect(accentNamed('purple').color, talaBlue);
+        expect(accentNamed(null).color, talaBlue);
+      });
+
+      testWidgets('conversation circles use the exact accent', (tester) async {
+        Widget app(Accent accent) => MaterialApp(
+          theme: talaTheme(accent, Brightness.light),
+          home: Scaffold(
+            body: RoomList(
+              rooms: [Room('a', 'Family', false, 2)],
+              error: null,
+              selected: null,
+              onSelect: (_) {},
+              onRefresh: () {},
+              onRemove: (_) {},
+              onArchive: (_) {},
+              settings: tempPrefs(),
+            ),
+          ),
+        );
+        Color? circle() => tester
+            .widget<CircleAvatar>(find.byType(CircleAvatar))
+            .backgroundColor;
+
+        await tester.pumpWidget(app(accents.first));
+        expect(circle(), const Color(0xFF0082C9));
+        await tester.pumpWidget(app(accentNamed('rose')));
+        await tester.pumpAndSettle();
+        expect(circle(), accentNamed('rose').color);
       });
     });
 
@@ -1232,11 +1315,15 @@ void main() {
         AppSettings(file: file)
           ..hideArchived = true
           ..archivedOpen = true
-          ..themeMode = ThemeMode.dark;
+          ..themeMode = ThemeMode.dark
+          ..accent = accentNamed('green')
+          ..messageSound = false;
         final again = AppSettings(file: file);
         expect(again.hideArchived, isTrue);
         expect(again.archivedOpen, isTrue);
         expect(again.themeMode, ThemeMode.dark);
+        expect(again.accent.name, 'green');
+        expect(again.messageSound, isFalse);
         file.writeAsStringSync('not json');
         expect(AppSettings(file: file).hideArchived, isFalse);
       });

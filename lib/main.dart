@@ -8,6 +8,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter/services.dart';
 
 import 'src/account_store.dart';
+import 'src/app_colors.dart';
 import 'src/app_menu.dart';
 import 'src/call.dart';
 import 'src/chat.dart';
@@ -61,6 +62,12 @@ Future<void> main(List<String> args) async {
     log('ring test done');
     exit(0);
   }
+  if (args.contains('--test-chime')) {
+    // A real popup with the real sound, for checking the desktop plays it.
+    await DesktopNotifier().show('test', 'Tala', 'Test message', sound: true);
+    log('chime test: sent');
+    exit(0);
+  }
   if (args.contains('--badge-test')) {
     // Shows a count on the dock for a moment, for checking how it looks.
     final tray = AppTray();
@@ -103,11 +110,8 @@ class _TalaAppState extends State<TalaApp> {
     listenable: _settings,
     builder: (context, _) => MaterialApp(
       title: 'Tala',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo),
-      darkTheme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-      ),
+      theme: talaTheme(_settings.accent, Brightness.light),
+      darkTheme: talaTheme(_settings.accent, Brightness.dark),
       themeMode: _settings.themeMode,
       home: StartPage(settings: _settings, startHidden: widget.startHidden),
     ),
@@ -354,7 +358,16 @@ class _RoomsPageState extends State<RoomsPage> {
   late final ChatAlerts _alerts = ChatAlerts(
     isViewing: (token) => _focused && _selected == token,
     show: (note) {
-      _notifier.show(note.token, note.title, note.body);
+      _notifier.show(
+        note.token,
+        note.title,
+        note.body,
+        // Not over a ringing phone or into the middle of a call.
+        sound:
+            widget.settings.messageSound &&
+            !_dialogOpen &&
+            Call.current == null,
+      );
       _refreshRooms();
     },
     hide: _notifier.close,

@@ -70,4 +70,13 @@ void main() {
     expect(args.sublist(split + 1),
         ['--title', '--evil &lt;b&gt;x&lt;/b&gt; &amp; y']);
   });
+
+  test('the sound goes as a hint, before the end of the options', () {
+    final args = notifyArgs('t', 'b', soundFile: '/a/message.wav');
+    expect(
+      args.indexOf('--hint=string:sound-file:/a/message.wav'),
+      lessThan(args.indexOf('--')),
+    );
+    expect(notifyArgs('t', 'b').any((a) => a.startsWith('--hint')), isFalse);
+  });
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
 import 'log.dart';
 
 /// Choices that belong to this computer. None of this goes to the server, so
@@ -21,6 +22,8 @@ class AppSettings extends ChangeNotifier {
   bool _hideArchived = false;
   bool _archivedOpen = false;
   ThemeMode _themeMode = ThemeMode.system;
+  Accent _accent = accents.first;
+  bool _messageSound = true;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -32,6 +35,13 @@ class AppSettings extends ChangeNotifier {
 
   ThemeMode get themeMode => _themeMode;
   set themeMode(ThemeMode value) => _change(() => _themeMode = value);
+
+  Accent get accent => _accent;
+  set accent(Accent value) => _change(() => _accent = value);
+
+  /// Chime with new-message popups. The desktop still decides whether it plays.
+  bool get messageSound => _messageSound;
+  set messageSound(bool value) => _change(() => _messageSound = value);
 
   void _change(VoidCallback apply) {
     apply();
@@ -46,9 +56,13 @@ class AppSettings extends ChangeNotifier {
       if (d is! Map) return;
       _hideArchived = d['hideArchived'] == true;
       _archivedOpen = d['archivedOpen'] == true;
+      _accent = accentNamed(d['accent'] as String?);
+      _messageSound = d['messageSound'] != false;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
+    } on TypeError {
+      log('settings: could not be read, using defaults');
     } on FormatException {
       log('settings: could not be read, using defaults');
     } on FileSystemException catch (e) {
@@ -65,6 +79,8 @@ class AppSettings extends ChangeNotifier {
         'hideArchived': _hideArchived,
         'archivedOpen': _archivedOpen,
         'theme': _themeMode.name,
+        'accent': _accent.name,
+        'messageSound': _messageSound,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

@@ -61,6 +61,7 @@ flutter:
 
   assets:
     - assets/sounds/ring.wav
+    - assets/sounds/message.wav
     - assets/icon/tala-small-64.png
     - LICENSE
 

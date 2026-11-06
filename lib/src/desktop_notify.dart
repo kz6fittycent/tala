@@ -14,9 +14,10 @@ String escapeMarkup(String s) => s
 
 /// `--` stops text beginning with a dash from being read as an option.
 @visibleForTesting
-List<String> notifyArgs(String title, String body) => [
+List<String> notifyArgs(String title, String body, {String? soundFile}) => [
       '--app-name=Tala',
       '--print-id',
+      if (soundFile != null) '--hint=string:sound-file:$soundFile',
       '--',
       title,
       escapeMarkup(body),
@@ -29,13 +30,38 @@ class DesktopNotifier {
   /// Notification id by key; null while the id is still on its way.
   final Map<String, String?> _shown = {};
   bool _reportedFailure = false;
+  DateTime? _lastSound;
+
+  /// A burst of messages shouldn't become a burst of chimes.
+  static const _soundGap = Duration(seconds: 3);
+
+  String get _soundFile => '${File(Platform.resolvedExecutable).parent.path}'
+      '/data/flutter_assets/assets/sounds/message.wav';
+
+  /// The notification server plays it, so Do Not Disturb and the system's own
+  /// sound settings apply. A server that ignores the hint stays silent.
+  String? _soundForNow() {
+    final now = DateTime.now();
+    final last = _lastSound;
+    if (last != null && now.difference(last) < _soundGap) return null;
+    _lastSound = now;
+    return _soundFile;
+  }
 
   /// Shows one notification per [key], replacing any earlier one.
-  Future<void> show(String key, String title, String body) async {
+  Future<void> show(
+    String key,
+    String title,
+    String body, {
+    bool sound = false,
+  }) async {
     close(key);
     _shown[key] = null;
     try {
-      final r = await Process.run('notify-send', notifyArgs(title, body));
+      final r = await Process.run(
+        'notify-send',
+        notifyArgs(title, body, soundFile: sound ? _soundForNow() : null),
+      );
       final id = (r.stdout as String).trim();
       if (!_shown.containsKey(key)) {
         // Closed before the id arrived.
