@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates Tala's icons into assets/icon. Needs numpy and Pillow.
 
-The app icon is a weathered Tiwaz cut into flat blue. Small sizes use a plain
+The app icon is a weathered Ansuz cut into flat blue. Small sizes use a plain
 rough rune, because texture doesn't survive there.
 """
 import random
@@ -64,16 +64,16 @@ def cut(d, a, b, wa, wb, rng, rough):
 
 
 def rune_mask(rough):
-    """The stave rises past the arms, and each arm is its own cut crossing it,
-    so no clean arrowhead point forms."""
+    """Ansuz: the stave sits left of centre to balance the rune, and each arm is
+    its own cut that starts across the stave and slopes down to the right."""
     rng = random.Random(5)
     m = Image.new("L", (S, S), 0)
     d = ImageDraw.Draw(m)
     c = S / 2
     p = lambda x, y: (c + x, c + y)
-    cut(d, p(-10, -395), p(14, 375), 118, 84, rng, rough)
-    cut(d, p(46, -292), p(-268, -20), 92, 58, rng, rough)
-    cut(d, p(-44, -262), p(238, -48), 86, 54, rng, rough)
+    cut(d, p(-108, -392), p(-92, 378), 118, 84, rng, rough)
+    cut(d, p(-150, -318), p(232, -74), 90, 56, rng, rough)
+    cut(d, p(-146, -92), p(226, 150), 86, 54, rng, rough)
     m = m.filter(ImageFilter.GaussianBlur(1.6)).point(lambda v: 255 if v > 118 else 0)
     return np.asarray(m, float) / 255
 
