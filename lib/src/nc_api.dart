@@ -682,6 +682,10 @@ class NcApi implements CallSource, ChatSource {
   Future<void> joinCall(String token, int flags) =>
       _ocs('POST', '$_talkV4/call/$token', body: {'flags': flags});
 
+  /// Corrects what this participant said it's sending when it joined.
+  Future<void> updateCallFlags(String token, int flags) =>
+      _ocs('PUT', '$_talkV4/call/$token', body: {'flags': flags});
+
   Future<void> leaveCall(String token) =>
       _ocs('DELETE', '$_talkV4/call/$token');
 }

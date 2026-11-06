@@ -40,6 +40,24 @@ class _Peer {
 
 /// One call through the signaling server's SFU: we publish a single stream by
 /// offering to our own session, and subscribe by asking for each publisher's.
+/// What this client tells the server it's sending.
+@visibleForTesting
+int callFlags({required bool audio, required bool video}) =>
+    _flagInCall | (audio ? _flagAudio : 0) | (video ? _flagVideo : 0);
+
+/// Adds what's missing to the call's status.
+@visibleForTesting
+String mediaNote({
+  required bool audio,
+  required bool video,
+  required String status,
+}) {
+  if (audio && video) return status;
+  if (audio) return '$status (no camera)';
+  if (video) return '$status (no mic)';
+  return '$status (no camera or mic)';
+}
+
 class Call extends ChangeNotifier {
   /// The call in progress, so quitting from the tray can hang it up first.
   static Call? current;
@@ -80,6 +98,7 @@ class Call extends ChangeNotifier {
 
   Future<void> start() async {
     current = this;
+    Future<MediaStream?>? media;
     try {
       log('call: starting, room type ${room.type}, '
           'call already active: ${room.hasCall}');
@@ -89,24 +108,18 @@ class Call extends ChangeNotifier {
         throw StateError('Calls need a server with Nextcloud\'s High '
             'Performance Backend, and this one doesn\'t have it yet.');
       }
-      _state('Opening camera and mic');
-      _local = await navigator.mediaDevices.getUserMedia({
-        'audio': true,
-        'video': {'width': 1280, 'height': 720, 'frameRate': 30},
-      });
-      if (_ended) {
-        for (final t in _local!.getTracks()) {
-          await t.stop();
-        }
-        await _local!.dispose();
-        return;
-      }
-      localRenderer.srcObject = _local;
-
+      // The camera can take many seconds to open, and the other side shouldn't
+      // wait for it to ring. Announcing the streams up front is safe: the
+      // signaling server holds a stream request until the publisher appears
+      // (10s by default), and the web and iOS clients keep asking after that.
+      media = _openMedia();
       _state('Joining');
       final ncSession = await api.joinRoom(room.token);
       _joinedRoom = true;
-      if (_ended) return;
+      if (_ended) {
+        await _discard(media);
+        return;
+      }
       _sig
         ..onMessage = _onMessage
         ..onEvent = _onEvent
@@ -123,17 +136,80 @@ class Call extends ChangeNotifier {
             'hosted on another server. It may need updating.');
       }
       await _sig.joinRoom(room.token, ncSession, federation: federation);
-      await api.joinCall(room.token, _flagInCall | _flagAudio | _flagVideo);
+      await api.joinCall(room.token, callFlags(audio: true, video: true));
       _joinedCall = true;
-      await _publish();
       // Nobody was in the call and nobody has arrived, so they're being rung.
       if (!room.hasCall && !_otherArrived && !_ended) _ringback.start();
-      _state(_subs.isEmpty
-          ? 'In call, waiting for others'
-          : 'In call with ${_subs.length} other(s)');
+      if (_subs.isEmpty) _state('In call, opening camera and mic');
+
+      final local = await media;
+      if (_ended) {
+        await _discard(Future.value(local));
+        return;
+      }
+      await _useMedia(local);
     } catch (e) {
+      _ringback.stop();
+      // Once it's in use, hanging up releases it.
+      if (media != null && _local == null) unawaited(_discard(media));
       _state('Failed: $e');
     }
+  }
+
+  /// Never throws: a call can go on without a camera or mic, receive-only.
+  Future<MediaStream?> _openMedia() async {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': {'width': 1280, 'height': 720, 'frameRate': 30},
+      });
+    } catch (e) {
+      log('call: camera and mic failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> _discard(Future<MediaStream?> media) async {
+    final stream = await media;
+    if (stream == null) return;
+    for (final t in stream.getTracks()) {
+      await t.stop();
+    }
+    await stream.dispose();
+  }
+
+  Future<void> _useMedia(MediaStream? stream) async {
+    final audio = stream?.getAudioTracks().isNotEmpty ?? false;
+    final video = stream?.getVideoTracks().isNotEmpty ?? false;
+    log('call: media ready, audio: $audio, video: $video');
+    if (!audio || !video) {
+      // Others were told to expect both. A failure here must not end the call.
+      try {
+        await api.updateCallFlags(
+          room.token,
+          callFlags(audio: audio, video: video),
+        );
+      } catch (e) {
+        log('call: updating call flags failed: $e');
+      }
+    }
+    if (audio || video) {
+      _local = stream;
+      for (final t in stream!.getAudioTracks()) {
+        t.enabled = micOn;
+      }
+      for (final t in stream.getVideoTracks()) {
+        t.enabled = camOn;
+      }
+      localRenderer.srcObject = stream;
+      await _publish();
+    } else {
+      await _discard(Future.value(stream));
+    }
+    final others = _subs.isEmpty
+        ? 'In call, waiting for others'
+        : 'In call with ${_subs.length} other(s)';
+    _state(mediaNote(audio: audio, video: video, status: others));
   }
 
   Future<RTCPeerConnection> _newPc() => createPeerConnection({

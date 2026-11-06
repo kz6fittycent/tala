@@ -253,4 +253,24 @@ void main() {
     expect(seen.single, startsWith('Tala/'));
     expect(seen.single, isNot(contains('prototype')));
   });
+
+  test('call flags are updated with PUT and the new flags', () async {
+    late String method, path, body;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((q) async {
+      method = q.method;
+      path = q.uri.path;
+      body = await utf8.decoder.bind(q).join();
+      q.response.write('{"ocs":{"data":{}}}');
+      await q.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+    await NcApi(
+      Credentials('http://127.0.0.1:${server.port}', 'u', 'p'),
+    ).updateCallFlags('abc', 3);
+    expect(method, 'PUT');
+    expect(path, endsWith('/spreed/api/v4/call/abc'));
+    expect(body, contains('flags'));
+    expect(body, contains('3'));
+  });
 }
