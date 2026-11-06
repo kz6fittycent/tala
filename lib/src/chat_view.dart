@@ -170,7 +170,7 @@ class RoomList extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: FilledButton.icon(
-              icon: const Icon(Icons.add_comment_outlined),
+              icon: const Icon(Icons.add),
               label: const Text('New conversation'),
               onPressed: onNewConversation,
             ),

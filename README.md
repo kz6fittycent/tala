@@ -11,7 +11,10 @@ It's early, and not packaged yet. Help is on the
 
 You need Flutter, plus `libayatana-appindicator3-dev` and `libsecret-1-dev`.
 
-    flutter build linux --release
+    flutter build linux --release --no-tree-shake-icons
+
+The flag matters: without it, the release build's trimmed icon font can lose an
+icon.
 
 ## Support Tala
 
