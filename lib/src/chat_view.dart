@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -237,6 +238,9 @@ class _ConversationPaneState extends State<ConversationPane> {
       TextEditingController(text: widget.drafts[widget.room.token] ?? '');
   final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
+  final Map<int, Future<Uint8List>> _previews = {};
+  ChatMessage? _replyTo;
+  bool _canUpload = false;
 
   @override
   void initState() {
@@ -249,6 +253,29 @@ class _ConversationPaneState extends State<ConversationPane> {
     _scroll.addListener(_onScroll);
     _input.addListener(
         () => widget.drafts[widget.room.token] = _input.text);
+    widget.source.chatUploadsAllowed().then((allowed) {
+      if (mounted) setState(() => _canUpload = allowed);
+    }, onError: (Object e) => log('chat: attachment settings: $e'));
+  }
+
+  void _startReply(ChatMessage m) {
+    setState(() => _replyTo = m);
+    _inputFocus.requestFocus();
+  }
+
+  Future<void> _react(ChatMessage m, String emoji) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (!await _thread.toggleReaction(m.id, emoji)) {
+      messenger?.showSnackBar(
+          const SnackBar(content: Text('Couldn\'t update that reaction')));
+    }
+  }
+
+  Future<void> _attach() async {
+    final files = await openFiles();
+    for (final f in files) {
+      await _thread.sendFile(f.path);
+    }
   }
 
   void _onLifecycle(AppLifecycleState state) =>
@@ -262,13 +289,21 @@ class _ConversationPaneState extends State<ConversationPane> {
   void _send() {
     final text = _input.text;
     if (text.trim().isEmpty) return;
+    final reply = _replyTo;
     _input.clear();
-    _thread.send(text);
+    if (reply != null) setState(() => _replyTo = null);
+    _thread.send(text, replyTo: reply?.id);
     if (_scroll.hasClients) _scroll.jumpTo(0);
     _inputFocus.requestFocus();
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        _replyTo != null) {
+      setState(() => _replyTo = null);
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent ||
         (event.logicalKey != LogicalKeyboardKey.enter &&
             event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
@@ -332,13 +367,20 @@ class _ConversationPaneState extends State<ConversationPane> {
           ),
           if (_thread.problem != null) _Banner(_thread.problem!),
           Expanded(child: _body(context)),
-          if (room.canChat && !_thread.gone)
+          if (room.canChat && !_thread.gone) ...[
+            if (_replyTo != null)
+              _ReplyBar(
+                message: _replyTo!,
+                onCancel: () => setState(() => _replyTo = null),
+              ),
             _Composer(
               controller: _input,
               focus: _inputFocus,
               onKey: _onKey,
               onSend: _send,
-            )
+              onAttach: _canUpload ? _attach : null,
+            ),
+          ]
           else if (!room.canChat)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -397,6 +439,10 @@ class _ConversationPaneState extends State<ConversationPane> {
               message: m,
               own: m.actorType == 'users' && m.actorId == selfId,
               showName: !grouped,
+              canInteract: widget.room.canChat,
+              onReply: () => _startReply(m),
+              onReact: (emoji) => _react(m, emoji),
+              preview: (id) => _previews[id] ??= widget.source.chatPreview(id),
             ));
       final firstUnread = _hadUnread &&
           m.id > _lastReadAtOpen &&
@@ -423,7 +469,9 @@ class _Composer extends StatelessWidget {
     required this.focus,
     required this.onKey,
     required this.onSend,
+    required this.onAttach,
   });
+  final VoidCallback? onAttach;
   final TextEditingController controller;
   final FocusNode focus;
   final FocusOnKeyEventCallback onKey;
@@ -433,6 +481,13 @@ class _Composer extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.all(8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          if (onAttach != null) ...[
+            IconButton(
+                tooltip: 'Attach files',
+                icon: const Icon(Icons.attach_file),
+                onPressed: onAttach),
+            const SizedBox(width: 4),
+          ],
           Expanded(
             child: Focus(
               onKeyEvent: onKey,
@@ -495,70 +550,271 @@ class _SystemRow extends StatelessWidget {
   }
 }
 
+class _ReplyBar extends StatelessWidget {
+  const _ReplyBar({required this.message, required this.onCancel});
+  final ChatMessage message;
+  final VoidCallback onCancel;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surfaceContainerHigh,
+      padding: const EdgeInsets.only(left: 16, right: 8),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            'Replying to ${message.actorName}: ${message.text}'
+                .replaceAll('\n', ' '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+        IconButton(
+            tooltip: 'Cancel reply',
+            icon: const Icon(Icons.close),
+            onPressed: onCancel),
+      ]),
+    );
+  }
+}
+
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.own, required this.child});
+  const _Bubble({required this.own, required this.child, this.actions});
   final bool own;
   final Widget child;
+  final Widget? actions;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      child: Align(
-        alignment: own ? Alignment.centerRight : Alignment.centerLeft,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: own
-                  ? scheme.primaryContainer
-                  : scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: child,
-            ),
+    final bubble = Flexible(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color:
+                own ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: child,
           ),
         ),
+      ),
+    );
+    final side = actions;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      child: Row(
+        mainAxisAlignment:
+            own ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (own && side != null) side,
+          bubble,
+          if (!own && side != null) side,
+        ],
       ),
     );
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble(
-      {required this.message, required this.own, required this.showName});
+const _quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+
+/// Shows while the pointer is over the message or a button here has keyboard
+/// focus, and always holds its space so messages don't shift.
+class _MessageActions extends StatefulWidget {
+  const _MessageActions({
+    required this.visible,
+    required this.onReply,
+    required this.onReact,
+  });
+  final bool visible;
+  final VoidCallback? onReply;
+  final ValueChanged<String>? onReact;
+  @override
+  State<_MessageActions> createState() => _MessageActionsState();
+}
+
+class _MessageActionsState extends State<_MessageActions> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) => Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (f) => setState(() => _focused = f),
+        child: Opacity(
+          opacity: widget.visible || _focused ? 1 : 0,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (widget.onReply != null)
+              IconButton(
+                  tooltip: 'Reply',
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.reply),
+                  onPressed: widget.onReply),
+            if (widget.onReact != null)
+              PopupMenuButton<String>(
+                tooltip: 'Add a reaction',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.add_reaction_outlined),
+                onSelected: widget.onReact,
+                itemBuilder: (context) => [
+                  for (final e in _quickReactions)
+                    PopupMenuItem(value: e, child: Text(e)),
+                ],
+              ),
+          ]),
+        ),
+      );
+}
+
+class _Reactions extends StatelessWidget {
+  const _Reactions({required this.message, required this.onReact});
+  final ChatMessage message;
+  final ValueChanged<String>? onReact;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(spacing: 4, runSpacing: 4, children: [
+        for (final e in message.reactions.entries)
+          ActionChip(
+            label: Text('${e.key} ${e.value}'),
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            tooltip: message.reactionsSelf.contains(e.key)
+                ? 'Remove your reaction'
+                : 'Add this reaction',
+            backgroundColor: message.reactionsSelf.contains(e.key)
+                ? scheme.secondaryContainer
+                : null,
+            onPressed: onReact == null ? null : () => onReact!(e.key),
+          ),
+      ]),
+    );
+  }
+}
+
+/// A fixed size, so messages above don't shift when the image arrives.
+class _ImagePreview extends StatelessWidget {
+  const _ImagePreview({required this.segment, required this.bytes});
+  final Segment segment;
+  final Future<Uint8List> bytes;
+  @override
+  Widget build(BuildContext context) {
+    final url = segment.url;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: FutureBuilder<Uint8List>(
+        future: bytes,
+        builder: (context, snap) {
+          if (snap.hasError) return const SizedBox.shrink();
+          final data = snap.data;
+          return SizedBox(
+            width: 360,
+            height: 240,
+            child: data == null
+                ? const Center(child: CircularProgressIndicator())
+                : MouseRegion(
+                    cursor: url != null
+                        ? SystemMouseCursors.click
+                        : MouseCursor.defer,
+                    child: GestureDetector(
+                      onTap: url == null ? null : () => openExternal(url),
+                      child: Image.memory(
+                        data,
+                        // Bounds the memory a huge image can take once decoded.
+                        cacheWidth: 960,
+                        fit: BoxFit.contain,
+                        semanticLabel: segment.text,
+                        errorBuilder: (context, _, _) =>
+                            const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatefulWidget {
+  const _MessageBubble({
+    required this.message,
+    required this.own,
+    required this.showName,
+    required this.canInteract,
+    required this.onReply,
+    required this.onReact,
+    required this.preview,
+  });
   final ChatMessage message;
   final bool own;
   final bool showName;
+  final bool canInteract;
+  final VoidCallback onReply;
+  final ValueChanged<String> onReact;
+  final Future<Uint8List> Function(int fileId) preview;
+
+  @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
+    final message = widget.message;
     final theme = Theme.of(context);
     final small = theme.textTheme.bodySmall;
     final time = MaterialLocalizations.of(context).formatTimeOfDay(
         TimeOfDay.fromDateTime(message.time),
         alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
     final parent = message.parent;
-    return _Bubble(
-      own: own,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (showName && !own)
+    final canReply = widget.canInteract && message.isReplyable;
+    final canReact = widget.canInteract && message.canReact;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: _Bubble(
+        own: widget.own,
+        actions: canReply || canReact
+            ? _MessageActions(
+                visible: _hover,
+                onReply: canReply ? widget.onReply : null,
+                onReact: canReact ? widget.onReact : null,
+              )
+            : null,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (widget.showName && !widget.own)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                  message.actorName.isEmpty ? 'Guest' : message.actorName,
+                  style: small?.copyWith(fontWeight: FontWeight.bold)),
+            ),
+          if (parent != null && !message.isDeleted)
+            _Quote(parent: parent, deleted: message.parentDeleted),
+          for (final s in message.segments)
+            if (s.previewFileId != null)
+              _ImagePreview(segment: s, bytes: widget.preview(s.previewFileId!)),
+          _MessageText(message.segments, italic: message.isDeleted),
+          if (message.reactions.isNotEmpty)
+            _Reactions(
+                message: message,
+                onReact: widget.canInteract ? widget.onReact : null),
           Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Text(
-                message.actorName.isEmpty ? 'Guest' : message.actorName,
-                style: small?.copyWith(fontWeight: FontWeight.bold)),
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(message.edited ? '$time · edited' : time, style: small),
           ),
-        if (parent != null && !message.isDeleted)
-          _Quote(parent: parent, deleted: message.parentDeleted),
-        _MessageText(message.segments, italic: message.isDeleted),
-        Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Text(message.edited ? '$time · edited' : time, style: small),
-        ),
-      ]),
+        ]),
+      ),
     );
   }
 }
@@ -662,9 +918,10 @@ class _OutgoingBubble extends StatelessWidget {
     return _Bubble(
       own: true,
       child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        Text(message.text),
+        Text(message.filePath != null ? '📎 ${message.text}' : message.text),
         if (!failed)
-          Text('Sending…', style: theme.textTheme.bodySmall)
+          Text(message.filePath != null ? 'Uploading…' : 'Sending…',
+              style: theme.textTheme.bodySmall)
         else
           Row(mainAxisSize: MainAxisSize.min, children: [
             Text(message.error ?? 'Not sent',

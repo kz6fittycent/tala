@@ -32,6 +32,12 @@ class FakeSource implements ChatSource {
   final List<Completer<ChatMessage>> sends = [];
   final List<String> sent = [];
   final List<int> marked = [];
+  final List<int?> replies = [];
+  final List<String> reacted = [];
+  final List<String> uploads = [];
+  final List<String> shares = [];
+  bool uploadsAllowed = true;
+  Object? uploadError, shareError, reactError;
 
   @override
   Future<List<ChatMessage>> chatHistory(String token, {int? beforeId}) async {
@@ -49,8 +55,39 @@ class FakeSource implements ChatSource {
   }
 
   @override
-  Future<ChatMessage> chatSend(String token, String text, String ref) {
+  Future<bool> chatUploadsAllowed() async => uploadsAllowed;
+
+  @override
+  Future<String> chatUpload(String localPath) async {
+    uploads.add(localPath);
+    final e = uploadError;
+    if (e != null) throw e;
+    return '/Talk/f';
+  }
+
+  @override
+  Future<void> chatShareFile(String token, String remote, String ref) async {
+    shares.add(remote);
+    final e = shareError;
+    if (e != null) throw e;
+  }
+
+  @override
+  Future<Uint8List> chatPreview(int fileId) async => Uint8List(0);
+
+  @override
+  Future<void> chatReact(String token, int id, String emoji,
+      {required bool remove}) async {
+    reacted.add('${remove ? '-' : '+'}$emoji');
+    final e = reactError;
+    if (e != null) throw e;
+  }
+
+  @override
+  Future<ChatMessage> chatSend(String token, String text, String ref,
+      {int? replyTo}) {
     sent.add(ref);
+    replies.add(replyTo);
     final c = Completer<ChatMessage>();
     sends.add(c);
     return c.future;
@@ -83,6 +120,24 @@ void main() {
       final s = parseMessage('see https://a.b/c, ok', {});
       expect(s[1].url, 'https://a.b/c');
       expect(s[2].text, ', ok');
+    });
+
+    test('only previewable images get a preview', () {
+      Segment file(Map<String, dynamic> extra) => parseMessage('{file}', {
+            'file': {'type': 'file', 'name': 'x', 'id': '7', ...extra},
+          }).single;
+      expect(
+          file({'mimetype': 'image/png', 'preview-available': 'yes'})
+              .previewFileId,
+          7);
+      expect(
+          file({'mimetype': 'image/png', 'preview-available': 'no'})
+              .previewFileId,
+          isNull);
+      expect(
+          file({'mimetype': 'application/pdf', 'preview-available': 'yes'})
+              .previewFileId,
+          isNull);
     });
 
     test('never makes other schemes clickable', () {
@@ -270,6 +325,96 @@ void main() {
       expect(t.outgoing, isEmpty);
     });
 
+    test('a reply carries the id of the message it answers', () async {
+      src.history = (_) => [msg(1)];
+      t.start();
+      await settle();
+      unawaited(t.send('yes', replyTo: 1));
+      await settle();
+      expect(src.replies.single, 1);
+    });
+
+    test('reacting shows immediately and toggles off', () async {
+      src.history = (_) => [msg(1)];
+      t.start();
+      await settle();
+      expect(await t.toggleReaction(1, '👍'), isTrue);
+      expect(t.messages.single.reactions['👍'], 1);
+      expect(t.messages.single.reactionsSelf, ['👍']);
+      expect(await t.toggleReaction(1, '👍'), isTrue);
+      expect(t.messages.single.reactions, isEmpty);
+      expect(src.reacted, ['+👍', '-👍']);
+    });
+
+    test('a refused reaction is rolled back', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..reactError = ApiException(403, 'p');
+      t.start();
+      await settle();
+      expect(await t.toggleReaction(1, '👍'), isFalse);
+      expect(t.messages.single.reactions, isEmpty);
+    });
+
+    test('a live reaction update replaces the counts', () async {
+      src.history = (_) => [msg(1)];
+      t.start();
+      await settle();
+      src.waits.last.complete([
+        ChatMessage.fromJson({
+          'id': 2,
+          'systemMessage': 'reaction',
+          'message': '',
+          'parent': {
+            'id': 1,
+            'message': 'hi',
+            'reactions': {'🎉': 2},
+            'reactionsSelf': ['🎉'],
+          },
+        }),
+      ]);
+      await settle();
+      expect(t.messages.single.reactions, {'🎉': 2});
+      expect(t.messages.single.reactionsSelf, ['🎉']);
+    });
+
+    test('a file uploads, then shares, then clears', () async {
+      src.history = (_) => [msg(1)];
+      t.start();
+      await settle();
+      await t.sendFile('/home/me/a.pdf');
+      expect(src.uploads, ['/home/me/a.pdf']);
+      expect(src.shares, ['/Talk/f']);
+      expect(t.outgoing, isEmpty);
+    });
+
+    test('retrying after a failed share does not upload again', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..shareError = ApiException(500, 'p');
+      t.start();
+      await settle();
+      await t.sendFile('/home/me/a.pdf');
+      final o = t.outgoing.single;
+      expect(o.state, SendState.failed);
+      expect(o.text, 'a.pdf');
+      src.shareError = null;
+      await t.retry(o);
+      expect(src.uploads, hasLength(1));
+      expect(src.shares, hasLength(2));
+      expect(t.outgoing, isEmpty);
+    });
+
+    test('a failed upload explains a full server', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..uploadError = ApiException(507, 'p');
+      t.start();
+      await settle();
+      await t.sendFile('/home/me/a.pdf');
+      expect(t.outgoing.single.error, contains('storage'));
+    });
+
     test('blank messages are not sent', () async {
       await t.send('  \n ');
       expect(src.sent, isEmpty);
@@ -371,6 +516,56 @@ void main() {
       await tester.pump();
       expect(src.sent, hasLength(1));
       expect(find.text('Sending…'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a reply goes out with its target, then the bar clears',
+        (tester) async {
+      final src = FakeSource()
+        ..history = (_) => [
+              ChatMessage.fromJson({
+                'id': 1,
+                'actorDisplayName': 'Bob',
+                'message': 'question',
+                'isReplyable': true,
+              }),
+            ];
+      tester.view.physicalSize = const Size(1000, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Reply'));
+      await tester.pump();
+      expect(find.textContaining('Replying to Bob'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.textContaining('Replying to Bob'), findsNothing);
+      await tester.tap(find.byTooltip('Reply'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'answer');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(src.replies.single, 1);
+      expect(find.textContaining('Replying to Bob'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('system messages offer no reply or reaction', (tester) async {
+      final src = FakeSource()
+        ..history = (_) => [
+              ChatMessage.fromJson({
+                'id': 1,
+                'systemMessage': 'call_ended',
+                'messageType': 'system',
+                'message': 'Call ended',
+              }),
+            ];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      expect(find.text('Call ended'), findsOneWidget);
+      expect(find.byTooltip('Reply'), findsNothing);
+      expect(find.byTooltip('Add a reaction'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 

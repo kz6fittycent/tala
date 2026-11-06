@@ -22,6 +22,7 @@ class Ringer {
         '--app-name=Tala',
         '--urgency=critical',
         '--print-id',
+        '--',
         'Incoming call',
         caller,
       ]);

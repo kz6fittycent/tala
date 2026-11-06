@@ -6,7 +6,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'src/call.dart';
 import 'src/camera_cycle.dart';
+import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
+import 'src/desktop_notify.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
@@ -121,10 +123,31 @@ class _RoomsPageState extends State<RoomsPage> {
   String? _selected;
   Timer? _roomTimer;
   final Map<String, String> _drafts = {};
+  final DesktopNotifier _notifier = DesktopNotifier();
+  late final AppLifecycleListener _lifecycle;
+  late final ChatAlerts _alerts = ChatAlerts(
+    isViewing: (token) => _focused && _selected == token,
+    show: (note) {
+      _notifier.show(note.token, note.title, note.body);
+      _refreshRooms();
+    },
+    hide: _notifier.close,
+    dismiss: (id) => widget.api.dismissNotification(id).catchError((Object e) {
+      log('chat: clearing a notification failed: $e');
+    }),
+  );
+  bool _focused = true;
 
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(onStateChange: (state) {
+      log('app: ${state.name}');
+      _focused = state == AppLifecycleState.resumed;
+    });
+    widget.api
+      ..onChatNotes = _alerts.update
+      ..onConversationRead = _alerts.conversationRead;
     _incoming.addListener(_onIncomingChanged);
     _incoming.start();
     _refreshRooms();
@@ -155,6 +178,11 @@ class _RoomsPageState extends State<RoomsPage> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
+    widget.api
+      ..onChatNotes = null
+      ..onConversationRead = null;
+    _notifier.closeAll();
     _roomTimer?.cancel();
     _incoming.removeListener(_onIncomingChanged);
     _incoming.dispose();

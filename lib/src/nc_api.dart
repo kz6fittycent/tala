@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'chat.dart';
+import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 
@@ -192,16 +194,174 @@ class NcApi implements CallSource, ChatSource {
       timeout: const Duration(seconds: 45));
 
   @override
-  Future<ChatMessage> chatSend(
-      String token, String text, String referenceId) async {
-    final d = await _ocs('POST', '$_chatV1/$token',
-        body: {'message': text, 'referenceId': referenceId});
+  Future<ChatMessage> chatSend(String token, String text, String referenceId,
+      {int? replyTo}) async {
+    final d = await _ocs('POST', '$_chatV1/$token', body: {
+      'message': text,
+      'referenceId': referenceId,
+      'replyTo': ?replyTo,
+    });
     return ChatMessage.fromJson((d as Map).cast<String, dynamic>());
   }
 
+  /// Called with each fresh list of chat notifications.
+  void Function(List<ChatNote> notes)? onChatNotes;
+
+  /// Called after the read marker moves in a conversation.
+  void Function(String token)? onConversationRead;
+
   @override
-  Future<void> chatMarkRead(String token, int id) =>
-      _ocs('POST', '$_chatV1/$token/read', body: {'lastReadMessage': id});
+  Future<void> chatMarkRead(String token, int id) async {
+    await _ocs('POST', '$_chatV1/$token/read', body: {'lastReadMessage': id});
+    onConversationRead?.call(token);
+  }
+
+  @override
+  Future<void> chatReact(String token, int messageId, String emoji,
+      {required bool remove}) {
+    final path = '/ocs/v2.php/apps/spreed/api/v1/reaction/$token/$messageId';
+    return remove
+        ? _ocs('DELETE',
+            '$path?reaction=${Uri.encodeQueryComponent(emoji)}')
+        : _ocs('POST', path, body: {'reaction': emoji});
+  }
+
+  Map<String, dynamic>? _attachmentConfig;
+  String? _userId;
+
+  Future<Map<String, dynamic>> _attachments() async {
+    final known = _attachmentConfig;
+    if (known != null) return known;
+    final d = await _ocs('GET', '/ocs/v2.php/cloud/capabilities');
+    final cfg = d['capabilities']?['spreed']?['config']?['attachments'];
+    return _attachmentConfig =
+        cfg is Map ? cfg.cast<String, dynamic>() : const {};
+  }
+
+  /// The login name can differ from the user id that file paths need.
+  Future<String> _uid() async => _userId ??=
+      (await _ocs('GET', '/ocs/v2.php/cloud/user'))['id'] as String;
+
+  @override
+  Future<bool> chatUploadsAllowed() async =>
+      (await _attachments())['allowed'] == true;
+
+  Uri _davUri(String uid, List<String> segments) {
+    final base = Uri.parse(creds.server);
+    return base.replace(pathSegments: [
+      ...base.pathSegments.where((s) => s.isNotEmpty),
+      'remote.php',
+      'dav',
+      'files',
+      uid,
+      ...segments,
+    ]);
+  }
+
+  /// `If-None-Match: *` makes the server refuse rather than overwrite a file
+  /// that already has this name.
+  Future<int> _davPut(Uri uri, File file, int length) async {
+    final req = await _http.putUrl(uri);
+    _authHeaders(req);
+    req.followRedirects = false;
+    req.headers
+      ..set('If-None-Match', '*')
+      ..contentLength = length
+      ..contentType = ContentType.binary;
+    await req.addStream(file.openRead());
+    final res = await req.close();
+    await res.drain<void>();
+    return res.statusCode;
+  }
+
+  Future<void> _davMkdirs(String uid, List<String> folder) async {
+    for (var i = 1; i <= folder.length; i++) {
+      final uri = _davUri(uid, folder.sublist(0, i));
+      final req = await _http.openUrl('MKCOL', uri);
+      _authHeaders(req);
+      final res = await req.close();
+      await res.drain<void>();
+      // 405 means the folder already exists.
+      if (res.statusCode >= 300 && res.statusCode != 405) {
+        throw ApiException(res.statusCode, 'creating attachment folder');
+      }
+    }
+  }
+
+  @override
+  Future<String> chatUpload(String localPath) async {
+    final cfg = await _attachments();
+    if (cfg['allowed'] != true) throw ApiException(403, 'attachments');
+    final uid = await _uid();
+    final folder = '${cfg['folder'] ?? '/Talk'}'
+        .split('/')
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final file = File(localPath);
+    final length = await file.length();
+    final name = localPath.split(Platform.pathSeparator).last;
+    final dot = name.lastIndexOf('.');
+    final stem = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+
+    var madeFolder = false;
+    var attempt = 0;
+    while (attempt < 100) {
+      final candidate = attempt == 0 ? name : '$stem ($attempt)$ext';
+      final status =
+          await _davPut(_davUri(uid, [...folder, candidate]), file, length);
+      if (status < 300) return '/${[...folder, candidate].join('/')}';
+      if (status == 412) {
+        attempt++;
+      } else if ((status == 404 || status == 409) && !madeFolder) {
+        madeFolder = true;
+        await _davMkdirs(uid, folder);
+      } else {
+        throw ApiException(status, 'uploading a file');
+      }
+    }
+    throw ApiException(412, 'uploading a file: too many name conflicts');
+  }
+
+  @override
+  Future<void> chatShareFile(
+      String token, String remotePath, String referenceId) async {
+    await _ocs('POST', '/ocs/v2.php/apps/files_sharing/api/v1/shares', body: {
+      'shareType': 10,
+      'shareWith': token,
+      'path': remotePath,
+      'referenceId': referenceId,
+    });
+  }
+
+  static const _maxPreviewBytes = 20 * 1024 * 1024;
+
+  @override
+  Future<Uint8List> chatPreview(int fileId) async {
+    const path = '/index.php/core/preview';
+    final uri = Uri.parse('${creds.server}$path').replace(queryParameters: {
+      'fileId': '$fileId',
+      'x': '960',
+      'y': '720',
+      'a': '1',
+    });
+    final req = await _http.getUrl(uri);
+    _authHeaders(req);
+    req.cookies.addAll(_cookies.values);
+    final res = await req.close();
+    if (res.statusCode >= 300) {
+      await res.drain<void>();
+      throw ApiException(res.statusCode, path);
+    }
+    final out = BytesBuilder(copy: false);
+    await for (final chunk in res) {
+      out.add(chunk);
+      if (out.length > _maxPreviewBytes) {
+        throw ApiException(413, path);
+      }
+    }
+    return out.takeBytes();
+  }
 
   Future<dynamic> _ocs(String method, String path,
       {Map<String, dynamic>? body}) async {
@@ -243,6 +403,19 @@ class NcApi implements CallSource, ChatSource {
     if (res.statusCode >= 300) throw ApiException(res.statusCode, path);
     _notificationsEtag = res.headers.value('etag');
     final data = (jsonDecode(text) as Map)['ocs']['data'] as List;
+    onChatNotes?.call([
+      for (final n in data)
+        if (n['app'] == 'spreed' &&
+            n['object_type'] == 'chat' &&
+            n['shouldNotify'] != false)
+          ChatNote(
+            n['notification_id'] as int,
+            // Some versions append the message id after a slash.
+            (n['object_id'] as String).split('/').first,
+            (n['subject'] ?? 'New message') as String,
+            (n['message'] ?? '') as String,
+          ),
+    ]);
     return [
       for (final n in data)
         if (n['app'] == 'spreed' &&

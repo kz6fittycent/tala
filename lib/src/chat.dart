@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -17,9 +18,12 @@ enum SegmentKind { text, mention, file, link }
 
 /// One styled run of a message's text.
 class Segment {
-  const Segment(this.text, this.kind, [this.url]);
+  const Segment(this.text, this.kind, [this.url, this.previewFileId]);
   final String text;
   final SegmentKind kind;
+
+  /// Set on an image file the server can show a preview of.
+  final int? previewFileId;
 
   /// Only ever http or https, so a message can't launch anything else.
   final String? url;
@@ -81,7 +85,11 @@ List<Segment> parseMessage(String message, Map<String, dynamic> params) {
     final name = p['name'] as String;
     final type = p['type'];
     if (type == 'file') {
-      out.add(Segment(name, SegmentKind.file, safeUrl(p['link'])));
+      final id = int.tryParse('${p['id']}');
+      final image = '${p['mimetype']}'.startsWith('image/') &&
+          p['preview-available'] == 'yes';
+      out.add(Segment(
+          name, SegmentKind.file, safeUrl(p['link']), image ? id : null));
     } else if (_mentionTypes.contains(type)) {
       out.add(Segment(name, SegmentKind.mention));
     } else {
@@ -111,6 +119,9 @@ class ChatMessage {
     this.parent,
     this.edited = false,
     this.parentDeleted = false,
+    this.isReplyable = false,
+    this.reactions = const {},
+    this.reactionsSelf = const [],
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) {
@@ -130,6 +141,15 @@ class ChatMessage {
       parent: hasParent ? ChatMessage.fromJson(parent) : null,
       edited: (j['lastEditTimestamp'] as int? ?? 0) > 0,
       parentDeleted: parent['deleted'] == true,
+      isReplyable: j['isReplyable'] == true,
+      reactions: {
+        for (final e in _map(j['reactions']).entries)
+          if (e.value is int && (e.value as int) > 0) e.key: e.value as int,
+      },
+      reactionsSelf: [
+        for (final r in (j['reactionsSelf'] as List? ?? const []))
+          if (r is String) r,
+      ],
     );
   }
 
@@ -145,6 +165,9 @@ class ChatMessage {
   final ChatMessage? parent;
   final bool edited;
   final bool parentDeleted;
+  final bool isReplyable;
+  final Map<String, int> reactions;
+  final List<String> reactionsSelf;
 
   String get text => segments.map((s) => s.text).join();
   bool get isSystem => systemKind.isNotEmpty || type == 'system';
@@ -155,6 +178,38 @@ class ChatMessage {
 
   DateTime get time =>
       DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+
+  bool get canReact => !isSystem && !isDeleted;
+
+  /// A copy with the user's own [emoji] added or removed.
+  ChatMessage withOwnReaction(String emoji, {required bool add}) {
+    final counts = {...reactions};
+    final count = (counts[emoji] ?? 0) + (add ? 1 : -1);
+    if (count > 0) {
+      counts[emoji] = count;
+    } else {
+      counts.remove(emoji);
+    }
+    return ChatMessage(
+      id: id,
+      actorType: actorType,
+      actorId: actorId,
+      actorName: actorName,
+      timestamp: timestamp,
+      segments: segments,
+      systemKind: systemKind,
+      type: type,
+      referenceId: referenceId,
+      parent: parent,
+      edited: edited,
+      parentDeleted: parentDeleted,
+      isReplyable: isReplyable,
+      reactions: counts,
+      reactionsSelf: add
+          ? [...reactionsSelf, emoji]
+          : reactionsSelf.where((e) => e != emoji).toList(),
+    );
+  }
 }
 
 const _hiddenKinds = {
@@ -172,16 +227,41 @@ abstract class ChatSource {
 
   /// Waits on the server for anything after [afterId]; empty when none came.
   Future<List<ChatMessage>> chatWait(String token, int afterId);
-  Future<ChatMessage> chatSend(String token, String text, String referenceId);
+  Future<ChatMessage> chatSend(String token, String text, String referenceId,
+      {int? replyTo});
   Future<void> chatMarkRead(String token, int id);
+  Future<void> chatReact(String token, int messageId, String emoji,
+      {required bool remove});
+
+  /// Whether this server lets the user attach files to chats.
+  Future<bool> chatUploadsAllowed();
+
+  /// Stores a local file in the user's attachment folder and returns its path
+  /// there. Never overwrites an existing file.
+  Future<String> chatUpload(String localPath);
+
+  /// Posts an uploaded file to the conversation.
+  Future<void> chatShareFile(
+      String token, String remotePath, String referenceId);
+
+  /// A preview of an image the user can already access.
+  Future<Uint8List> chatPreview(int fileId);
 }
 
 enum SendState { sending, failed }
 
 class OutgoingMessage {
-  OutgoingMessage(this.text, this.referenceId);
+  OutgoingMessage(this.text, this.referenceId, {this.replyTo, this.filePath});
   final String text;
   final String referenceId;
+  final int? replyTo;
+
+  /// Set when this is a file rather than a text message.
+  final String? filePath;
+
+  /// Kept after a successful upload, so retrying only redoes the share and
+  /// doesn't leave a second copy of the file.
+  String? remotePath;
   SendState state = SendState.sending;
   String? error;
 }
@@ -364,13 +444,44 @@ class ChatThread extends ChangeNotifier {
   }
 
   /// Returns once the attempt finishes. A failure stays listed for retry.
-  Future<void> send(String text) async {
+  Future<void> send(String text, {int? replyTo}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final o = OutgoingMessage(trimmed, newReferenceId());
+    final o = OutgoingMessage(trimmed, newReferenceId(), replyTo: replyTo);
     _outgoing.add(o);
     _changed();
     await _attempt(o);
+  }
+
+  /// Uploads and posts a local file. A failure stays listed for retry.
+  Future<void> sendFile(String path) async {
+    final name = path.split(Platform.pathSeparator).last;
+    final o = OutgoingMessage(name, newReferenceId(), filePath: path);
+    _outgoing.add(o);
+    _changed();
+    await _attempt(o);
+  }
+
+  /// Adds or removes the user's reaction, showing it immediately. Returns
+  /// false, with the message restored, if the server refused.
+  Future<bool> toggleReaction(int messageId, String emoji) async {
+    final before = _byId[messageId];
+    if (before == null) return false;
+    final remove = before.reactionsSelf.contains(emoji);
+    final shown = before.withOwnReaction(emoji, add: !remove);
+    _byId[messageId] = shown;
+    _changed();
+    try {
+      await _source.chatReact(token, messageId, emoji, remove: remove);
+      return true;
+    } catch (e) {
+      log('chat: reaction failed: $e');
+      if (_disposed) return false;
+      // Leave it alone if a newer version arrived from the server meanwhile.
+      if (identical(_byId[messageId], shown)) _byId[messageId] = before;
+      _changed();
+      return false;
+    }
   }
 
   Future<void> retry(OutgoingMessage o) async {
@@ -389,18 +500,31 @@ class ChatThread extends ChangeNotifier {
 
   Future<void> _attempt(OutgoingMessage o) async {
     try {
-      final sent = await _source.chatSend(token, o.text, o.referenceId);
-      if (_disposed) return;
-      // The poll advances _newestId; doing it here could skip a message
-      // someone else sent just before this one.
-      _addVisible(sent);
+      final file = o.filePath;
+      if (file != null) {
+        final remote = o.remotePath ??= await _source.chatUpload(file);
+        await _source.chatShareFile(token, remote, o.referenceId);
+        if (_disposed) return;
+        // The poll delivers the resulting message.
+      } else {
+        final sent = await _source.chatSend(token, o.text, o.referenceId,
+            replyTo: o.replyTo);
+        if (_disposed) return;
+        // The poll advances _newestId; doing it here could skip a message
+        // someone else sent just before this one.
+        _addVisible(sent);
+      }
       _outgoing.remove(o);
     } catch (e) {
       log('chat: send failed: $e');
       if (_disposed) return;
       o
         ..state = SendState.failed
-        ..error = _statusOf(e) == 413 ? 'Message too long' : 'Not sent';
+        ..error = switch (_statusOf(e)) {
+          413 => o.filePath != null ? 'File too large' : 'Message too long',
+          507 => 'Not enough storage on the server',
+          _ => 'Not sent',
+        };
     }
     _changed();
   }

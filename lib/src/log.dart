@@ -12,5 +12,7 @@ final File _file = () {
 void log(String message) {
   final line = '${DateTime.now().toIso8601String().substring(11, 23)} $message';
   stdout.writeln(line);
+  // Tests must not replace the log of a real session.
+  if (Platform.environment.containsKey('FLUTTER_TEST')) return;
   _file.writeAsStringSync('$line\n', mode: FileMode.append);
 }
