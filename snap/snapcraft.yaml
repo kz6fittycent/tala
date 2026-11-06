@@ -1,0 +1,115 @@
+name: tala
+adopt-info: tala
+title: Tala
+summary: Chat and calls for Nextcloud Talk (unofficial client)
+description: |
+  Tala is an independent desktop client for Nextcloud Talk: chat, audio calls
+  and video calls. It isn't made or endorsed by Nextcloud.
+
+  Sign in through your server's normal browser login. Tala keeps the app
+  password in your system keyring, stays in the tray when you close the window,
+  and shows desktop notifications for messages and calls.
+
+  Calls currently need a server with the High Performance Backend (external
+  signaling).
+
+  After installing, connect the interfaces it needs:
+
+    sudo snap connect tala:password-manager-service
+    sudo snap connect tala:camera
+    sudo snap connect tala:audio-record
+
+  Help: https://github.com/kz6fittycent/tala/wiki
+
+base: core24
+grade: stable
+confinement: strict
+license: AGPL-3.0-only
+icon: assets/icon/tala-512.png
+contact: https://github.com/kz6fittycent/tala/issues
+issues: https://github.com/kz6fittycent/tala/issues
+source-code: https://github.com/kz6fittycent/tala
+website: https://github.com/kz6fittycent/tala/wiki
+donation: https://ko-fi.com/kz6fittycent
+
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+
+# A second launch finds the running copy through this name.
+slots:
+  dbus-tala:
+    interface: dbus
+    bus: session
+    name: io.github.kz6fittycent.tala
+
+apps:
+  tala:
+    command: bin/tala
+    extensions: [gnome]
+    # snapd reads $SNAP_USER_DATA/.config/autostart/tala.desktop, which
+    # linux/runner/tray.cc writes when "Start at login" is on.
+    autostart: tala.desktop
+    slots: [dbus-tala]
+    plugs:
+      - network
+      # WebRTC binds its own UDP sockets.
+      - network-bind
+      - audio-playback
+      - audio-record
+      - camera
+      - password-manager-service
+      # The tray icon and the dock's message count.
+      - unity7
+
+parts:
+  tala:
+    plugin: nil
+    # git, not a plain copy: only committed files go in, so the snap matches a
+    # commit and the host's build/ stays out of the build instance.
+    source: .
+    source-type: git
+    build-packages:
+      - clang
+      - cmake
+      - curl
+      - git
+      - libayatana-appindicator3-dev
+      - libgtk-3-dev
+      - libsecret-1-dev
+      - ninja-build
+      - pkg-config
+      - unzip
+      - xz-utils
+    stage-packages:
+      # Run as commands by lib/src/desktop_notify.dart and lib/src/ringer.dart.
+      # paplay, not pw-play: audio-playback only opens the PulseAudio socket.
+      - libnotify-bin
+      - pulseaudio-utils
+      # libwebrtc needs these, and the GNOME runtime doesn't have them.
+      - libx11-6
+      - libxdamage1
+      - libxext6
+      - libxfixes3
+    override-pull: |
+      craftctl default
+      version="$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)"
+      craftctl set version="${version}"
+    override-build: |
+      # Build with the Ubuntu 24.04 packages above, the same base as the GNOME
+      # runtime. The gnome extension's SDK variables break host tools (its libc
+      # comes first) and aren't needed.
+      unset LD_LIBRARY_PATH PKG_CONFIG_PATH PYTHONPATH ACLOCAL_PATH CMAKE_PREFIX_PATH \
+        GI_TYPELIB_PATH GDK_PIXBUF_MODULE_FILE GETTEXTDATADIRS XDG_DATA_DIRS \
+        CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+      export PATH="${CRAFT_PART_BUILD}/.flutter/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      export HOME="${CRAFT_PART_BUILD}/.home"
+      mkdir -p "${HOME}"
+      tool/get-flutter.sh "${CRAFT_PART_BUILD}/.flutter"
+      flutter --disable-analytics
+      flutter pub get --enforce-lockfile
+      # Icons stay untrimmed: see CLAUDE.md.
+      flutter build linux --release --no-tree-shake-icons
+      mkdir -p "${CRAFT_PART_INSTALL}/bin"
+      cp -r build/linux/x64/release/bundle/. "${CRAFT_PART_INSTALL}/bin/"

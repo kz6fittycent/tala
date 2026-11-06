@@ -1,10 +1,16 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'log.dart';
 
+/// A snap can only reach the PulseAudio socket, and ships paplay for it.
+@visibleForTesting
+String ringPlayer(Map<String, String> environment) =>
+    environment.containsKey('SNAP') ? 'paplay' : 'pw-play';
+
 /// Linux-only for now: repeats the ring sound and shows a desktop notification.
-/// A snap has to ship its own player and notifier; Mac and Windows need their
-/// own version of this class.
+/// Mac and Windows need their own version of this class.
 class Ringer {
   Process? _player;
   bool _ringing = false;
@@ -35,7 +41,10 @@ class Ringer {
   Future<void> _loop() async {
     while (_ringing) {
       try {
-        _player = await Process.start('pw-play', [_sound]);
+        _player = await Process.start(
+          ringPlayer(Platform.environment),
+          [_sound],
+        );
         final code = await _player!.exitCode;
         if (code != 0 && _ringing) {
           log('ringer: player exited with $code');

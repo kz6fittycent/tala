@@ -305,6 +305,10 @@ class _StartPageState extends State<StartPage> {
               Text(
                 problem.locked
                     ? 'Tala keeps your sign-in there. Unlock it to continue.'
+                    : Platform.environment.containsKey('SNAP')
+                    ? 'Tala keeps your sign-in there, but no keyring service '
+                        'answered. The snap may need permission to use it:\n\n'
+                        'sudo snap connect tala:password-manager-service'
                     : 'Tala keeps your sign-in there, but no keyring service '
                         'answered. Your account is still saved if you\'ve '
                         'signed in before.',

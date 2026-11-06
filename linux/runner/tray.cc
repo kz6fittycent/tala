@@ -55,7 +55,14 @@ static void quit_activated_cb(GtkMenuItem* item, gpointer user_data) {
                                   quit_response_cb, tray);
 }
 
+// In a snap, snapd starts apps from this folder when the app declares
+// `autostart: tala.desktop`, and a path to the binary would break on refresh.
 static gchar* autostart_path() {
+  const gchar* snap_data = g_getenv("SNAP_USER_DATA");
+  if (snap_data != nullptr) {
+    return g_build_filename(snap_data, ".config", "autostart", "tala.desktop",
+                            nullptr);
+  }
   g_autofree gchar* name = g_strconcat(APPLICATION_ID, ".desktop", nullptr);
   return g_build_filename(g_get_user_config_dir(), "autostart", name, nullptr);
 }
@@ -66,14 +73,21 @@ static gboolean set_autostart(gboolean enabled) {
   if (!enabled) {
     return g_unlink(path) == 0 || !g_file_test(path, G_FILE_TEST_EXISTS);
   }
-  g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
-  if (exe == nullptr) return FALSE;
   g_autofree gchar* dir = g_path_get_dirname(path);
   if (g_mkdir_with_parents(dir, 0700) != 0) return FALSE;
-  // Double quotes keep a path with spaces in one piece; these characters would
-  // need escaping inside them, so refuse rather than write a broken entry.
-  if (strpbrk(exe, "\"`$\\") != nullptr) return FALSE;
-  g_autofree gchar* exec = g_strdup_printf("\"%s\" --background", exe);
+  g_autofree gchar* exec = nullptr;
+  if (g_getenv("SNAP_USER_DATA") != nullptr) {
+    // snapd replaces the command name with the snap's own.
+    exec = g_strdup("tala --background");
+  } else {
+    g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
+    if (exe == nullptr) return FALSE;
+    // Double quotes keep a path with spaces in one piece; these characters
+    // would need escaping inside them, so refuse rather than write a broken
+    // entry.
+    if (strpbrk(exe, "\"`$\\") != nullptr) return FALSE;
+    exec = g_strdup_printf("\"%s\" --background", exe);
+  }
   g_autoptr(GKeyFile) file = g_key_file_new();
   const gchar* group = G_KEY_FILE_DESKTOP_GROUP;
   g_key_file_set_string(file, group, "Type", "Application");
@@ -95,13 +109,16 @@ static void set_badge(Tray* tray, gint64 count) {
   g_variant_builder_add(&props, "{sv}", "count", g_variant_new_int64(count));
   g_variant_builder_add(&props, "{sv}", "count-visible",
                         g_variant_new_boolean(count > 0));
+  // The dock matches this to the desktop file, which a snap names itself.
+  const gchar* snap = g_getenv("SNAP_INSTANCE_NAME");
+  g_autofree gchar* uri =
+      snap != nullptr ? g_strdup_printf("application://%s_tala.desktop", snap)
+                      : g_strdup("application://" APPLICATION_ID ".desktop");
   g_autoptr(GError) error = nullptr;
   if (!g_dbus_connection_emit_signal(
           bus, nullptr, "/io/github/kz6fittycent/tala/launcher",
           "com.canonical.Unity.LauncherEntry", "Update",
-          g_variant_new("(sa{sv})", "application://" APPLICATION_ID ".desktop",
-                        &props),
-          &error)) {
+          g_variant_new("(sa{sv})", uri, &props), &error)) {
     g_warning("Could not update the dock count: %s", error->message);
   }
 }

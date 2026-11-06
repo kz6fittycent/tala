@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Tala
+Comment=Chat and calls for Nextcloud Talk
+Exec=tala
+Icon=${SNAP}/meta/gui/icon.png
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+StartupWMClass=io.github.kz6fittycent.tala

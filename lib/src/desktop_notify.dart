@@ -23,8 +23,7 @@ List<String> notifyArgs(String title, String body, {String? soundFile}) => [
       escapeMarkup(body),
     ];
 
-/// Linux-only for now, like Ringer: a snap has to ship notify-send, and Mac
-/// and Windows need their own version. There's no click action, because
+/// Linux-only for now, like Ringer: Mac and Windows need their own version. There's no click action, because
 /// Wayland won't let the app bring its own window forward anyway.
 class DesktopNotifier {
   /// Notification id by key; null while the id is still on its way.
