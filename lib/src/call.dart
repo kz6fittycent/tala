@@ -114,7 +114,9 @@ class Call extends ChangeNotifier {
       await api.joinCall(room.token, _flagInCall | _flagAudio | _flagVideo);
       _joinedCall = true;
       await _publish();
-      _state('In call, waiting for others');
+      _state(_subs.isEmpty
+          ? 'In call, waiting for others'
+          : 'In call with ${_subs.length} other(s)');
     } catch (e) {
       _state('Failed: $e');
     }
@@ -210,7 +212,7 @@ class Call extends ChangeNotifier {
   /// A publisher may still be connecting when we first ask, so keep asking
   /// until its offer arrives.
   void _requestOffer(String session) {
-    if (_offerRetry.containsKey(session)) return;
+    if (_ended || _offerRetry.containsKey(session)) return;
     var tries = 0;
     void ask() =>
         _sig.send(session, {'type': 'requestoffer', 'roomType': 'video'});
