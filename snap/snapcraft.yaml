@@ -37,13 +37,6 @@ platforms:
     build-on: [amd64]
     build-for: [amd64]
 
-# A second launch finds the running copy through this name.
-slots:
-  dbus-tala:
-    interface: dbus
-    bus: session
-    name: io.github.kz6fittycent.tala
-
 apps:
   tala:
     command: bin/tala
@@ -51,7 +44,6 @@ apps:
     # snapd reads $SNAP_USER_DATA/.config/autostart/tala.desktop, which
     # linux/runner/tray.cc writes when "Start at login" is on.
     autostart: tala.desktop
-    slots: [dbus-tala]
     plugs:
       - network
       # WebRTC binds its own UDP sockets.

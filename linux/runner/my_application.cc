@@ -1,6 +1,8 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <gio/gunixsocketaddress.h>
+#include <unistd.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -15,6 +17,8 @@ struct _MyApplication {
   GtkWindow* window;
   Tray* tray;
   Keyring* keyring;
+  // In a snap, what a second launch connects to (see claim_snap_instance).
+  GSocketService* snap_instance;
   // Started at login: stay in the tray rather than opening a window.
   gboolean start_hidden;
 };
@@ -128,6 +132,57 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
+// One byte asks the running copy to show its window. A login start sends none.
+static gboolean snap_instance_incoming_cb(GSocketService* service,
+                                          GSocketConnection* connection,
+                                          GObject* source, gpointer user_data) {
+  g_socket_set_timeout(g_socket_connection_get_socket(connection), 1);
+  guint8 request;
+  GInputStream* input = g_io_stream_get_input_stream(G_IO_STREAM(connection));
+  if (g_input_stream_read(input, &request, 1, nullptr, nullptr) == 1) {
+    g_application_activate(G_APPLICATION(user_data));
+  }
+  return FALSE;
+}
+
+// A snap can't own a D-Bus name without a store review, so there GApplication
+// can't keep Tala to one copy. An abstract socket can: the kernel frees it when
+// the process dies, and AppArmor allows a snap names under @snap.<instance>.
+// Returns whether this process should carry on as the only copy.
+static gboolean claim_snap_instance(MyApplication* self, const gchar* snap) {
+  // Abstract names are shared between users.
+  g_autofree gchar* name = g_strdup_printf("snap.%s.running.%u", snap, getuid());
+  g_autoptr(GSocketAddress) address = g_unix_socket_address_new_with_type(
+      name, -1, G_UNIX_SOCKET_ADDRESS_ABSTRACT);
+  g_autoptr(GSocketService) service = g_socket_service_new();
+  g_autoptr(GError) error = nullptr;
+  if (g_socket_listener_add_address(G_SOCKET_LISTENER(service), address,
+                                    G_SOCKET_TYPE_STREAM,
+                                    G_SOCKET_PROTOCOL_DEFAULT, nullptr, nullptr,
+                                    &error)) {
+    g_signal_connect(service, "incoming", G_CALLBACK(snap_instance_incoming_cb),
+                     self);
+    g_socket_service_start(service);
+    self->snap_instance = G_SOCKET_SERVICE(g_steal_pointer(&service));
+    return TRUE;
+  }
+  // Two copies are better than an app that won't start.
+  if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_ADDRESS_IN_USE)) {
+    g_warning("Could not check for a running copy: %s", error->message);
+    return TRUE;
+  }
+  g_autoptr(GSocketClient) client = g_socket_client_new();
+  g_autoptr(GSocketConnection) connection = g_socket_client_connect(
+      client, G_SOCKET_CONNECTABLE(address), nullptr, nullptr);
+  if (connection != nullptr && !self->start_hidden) {
+    GOutputStream* output =
+        g_io_stream_get_output_stream(G_IO_STREAM(connection));
+    const guint8 show = 1;
+    g_output_stream_write(output, &show, 1, nullptr, nullptr);
+  }
+  return FALSE;
+}
+
 // Implements GApplication::local_command_line.
 static gboolean my_application_local_command_line(GApplication* application,
                                                   gchar*** arguments,
@@ -141,8 +196,14 @@ static gboolean my_application_local_command_line(GApplication* application,
   self->start_hidden =
       arg_count == 1 &&
       g_strcmp0(self->dart_entrypoint_arguments[0], "--background") == 0;
-  if (arg_count > 0 && !self->start_hidden) {
+  gboolean developer_mode = arg_count > 0 && !self->start_hidden;
+  const gchar* snap = g_getenv("SNAP_INSTANCE_NAME");
+  if (developer_mode || snap != nullptr) {
     g_application_set_flags(application, G_APPLICATION_NON_UNIQUE);
+  }
+  if (snap != nullptr && !developer_mode && !claim_snap_instance(self, snap)) {
+    *exit_status = 0;
+    return TRUE;
   }
 
   g_autoptr(GError) error = nullptr;
@@ -185,6 +246,7 @@ static void my_application_dispose(GObject* object) {
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_pointer(&self->tray, tray_free);
   g_clear_pointer(&self->keyring, keyring_free);
+  g_clear_object(&self->snap_instance);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
