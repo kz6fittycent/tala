@@ -40,6 +40,9 @@ class _Peer {
 /// One call through the signaling server's SFU: we publish a single stream by
 /// offering to our own session, and subscribe by asking for each publisher's.
 class Call extends ChangeNotifier {
+  /// The call in progress, so quitting from the tray can hang it up first.
+  static Call? current;
+
   Call(this.api, this.room);
   final NcApi api;
   final Room room;
@@ -73,6 +76,7 @@ class Call extends ChangeNotifier {
       '${Random().nextInt(1 << 32)}';
 
   Future<void> start() async {
+    current = this;
     try {
       log('call: starting, room type ${room.type}, '
           'call already active: ${room.hasCall}');
@@ -324,6 +328,7 @@ class Call extends ChangeNotifier {
   Future<void> hangUp() async {
     if (_ended) return;
     _ended = true;
+    if (identical(current, this)) current = null;
     for (final t in _offerRetry.values) {
       t.cancel();
     }

@@ -13,6 +13,8 @@ import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
 import 'src/ringer.dart';
+import 'src/tray.dart';
+import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
 
 Future<void> main(List<String> args) async {
@@ -35,6 +37,10 @@ Future<void> main(List<String> args) async {
     log('ring test done');
     exit(0);
   }
+  if (args.contains('--tray-selftest')) {
+    runApp(const TraySelfTest());
+    return;
+  }
   runApp(args.contains('--selftest')
       ? const SelfTest()
       : args.contains('--camera-cycle')
@@ -46,7 +52,7 @@ class TalaApp extends StatelessWidget {
   const TalaApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Tala prototype',
+        title: 'Tala',
         theme: ThemeData(colorSchemeSeed: Colors.indigo),
         darkTheme: ThemeData(
             colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
@@ -137,10 +143,20 @@ class _RoomsPageState extends State<RoomsPage> {
     }),
   );
   bool _focused = true;
+  final AppTray _tray = AppTray();
+
+  /// Runs before the process ends when the user quits from the tray.
+  Future<void> _beforeQuit() async {
+    log('app: quitting');
+    _notifier.closeAll();
+    await _ringer.stop();
+    await Call.current?.hangUp();
+  }
 
   @override
   void initState() {
     super.initState();
+    _tray.start(onQuit: _beforeQuit);
     _lifecycle = AppLifecycleListener(onStateChange: (state) {
       log('app: ${state.name}');
       _focused = state == AppLifecycleState.resumed;
@@ -178,6 +194,7 @@ class _RoomsPageState extends State<RoomsPage> {
 
   @override
   void dispose() {
+    _tray.stop();
     _lifecycle.dispose();
     widget.api
       ..onChatNotes = null
@@ -195,6 +212,8 @@ class _RoomsPageState extends State<RoomsPage> {
     if (ring != null && !_dialogOpen) {
       _dialogOpen = true;
       _ringer.start(ring.name);
+      // The window may be hidden, and a call needs an answer.
+      _tray.show();
       _showIncoming(ring);
     } else if (ring == null && _dialogOpen) {
       // The caller gave up, or another of the user's devices answered.

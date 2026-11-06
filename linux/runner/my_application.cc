@@ -6,10 +6,13 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "tray.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
+  Tray* tray;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -19,11 +22,30 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// Closing the window keeps Tala reachable for calls while a tray icon can bring
+// it back. With no tray host, closing quits, as the window would be lost.
+static gboolean delete_event_cb(GtkWidget* widget, GdkEvent* event,
+                                gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (self->tray == nullptr || !tray_is_available(self->tray)) return FALSE;
+  gtk_widget_hide(widget);
+  return TRUE;
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // A second launch lands here in the running copy, which may be hidden.
+  if (self->window != nullptr) {
+    gtk_widget_show(GTK_WIDGET(self->window));
+    gtk_window_present(self->window);
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -45,11 +67,11 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "tala");
+    gtk_header_bar_set_title(header_bar, "Tala");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "tala");
+    gtk_window_set_title(window, "Tala");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
@@ -75,6 +97,9 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  self->tray = tray_new(GTK_APPLICATION(application), window, view);
+  g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb), self);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -85,6 +110,11 @@ static gboolean my_application_local_command_line(GApplication* application,
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+
+  // Developer modes such as --selftest run on their own, beside a running copy.
+  if (g_strv_length(self->dart_entrypoint_arguments) > 0) {
+    g_application_set_flags(application, G_APPLICATION_NON_UNIQUE);
+  }
 
   g_autoptr(GError) error = nullptr;
   if (!g_application_register(application, nullptr, &error)) {
@@ -121,6 +151,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_pointer(&self->tray, tray_free);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
@@ -142,7 +173,9 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // Unique, so launching Tala again brings up the running copy instead of
+  // starting a second one that would also ring and notify.
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     G_APPLICATION_DEFAULT_FLAGS, nullptr));
 }
