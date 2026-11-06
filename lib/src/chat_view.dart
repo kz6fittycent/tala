@@ -46,6 +46,7 @@ class ChatLayout extends StatelessWidget {
     required this.conversation,
     this.menu,
     this.banner,
+    this.onNewConversation,
   });
 
   final List<Room>? rooms;
@@ -59,6 +60,7 @@ class ChatLayout extends StatelessWidget {
   final Widget? conversation;
   final Widget? menu;
   final Widget? banner;
+  final VoidCallback? onNewConversation;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -74,6 +76,7 @@ class ChatLayout extends StatelessWidget {
         settings: settings,
         menu: menu,
         banner: banner,
+        onNewConversation: onNewConversation,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -106,6 +109,7 @@ class RoomList extends StatelessWidget {
     required this.settings,
     this.menu,
     this.banner,
+    this.onNewConversation,
   });
 
   final List<Room>? rooms;
@@ -118,6 +122,7 @@ class RoomList extends StatelessWidget {
   final AppSettings settings;
   final Widget? menu;
   final Widget? banner;
+  final VoidCallback? onNewConversation;
 
   Widget _tile(Room room) => _RoomTile(
     room: room,
@@ -161,6 +166,15 @@ class RoomList extends StatelessWidget {
             ],
           ),
         ),
+        if (onNewConversation != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: FilledButton.icon(
+              icon: const Icon(Icons.add_comment_outlined),
+              label: const Text('New conversation'),
+              onPressed: onNewConversation,
+            ),
+          ),
         ?banner,
         if (error != null && items != null)
           const _Banner('Can\'t reach the server. Retrying…'),

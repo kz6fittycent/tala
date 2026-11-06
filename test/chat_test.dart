@@ -1094,6 +1094,28 @@ void main() {
     });
 
     group('new conversation', () {
+      testWidgets('a labeled button sits at the top of the list',
+          (tester) async {
+        var pressed = 0;
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: RoomList(
+              rooms: const [],
+              error: null,
+              selected: null,
+              onSelect: (_) {},
+              onRefresh: () {},
+              onRemove: (_) {},
+              onArchive: (_) {},
+              settings: tempPrefs(),
+              onNewConversation: () => pressed++,
+            ),
+          ),
+        ));
+        await tester.tap(find.text('New conversation'));
+        expect(pressed, 1);
+      });
+
       Future<Person?> run(
         WidgetTester tester,
         Future<List<Person>> Function(String) search,

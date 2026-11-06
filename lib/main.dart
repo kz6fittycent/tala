@@ -698,21 +698,12 @@ class _RoomsPageState extends State<RoomsPage> {
           onRemove: _removeRoom,
           onArchive: (room) => _setArchived(room, !room.archived),
           settings: widget.settings,
-          menu: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'New conversation',
-                icon: const Icon(Icons.add_comment_outlined),
-                onPressed: _newConversation,
-              ),
-              AppMenu(
-                settings: widget.settings,
-                creds: widget.api.creds,
-                onChangeAccount: widget.onChangeAccount,
-              ),
-            ],
+          menu: AppMenu(
+            settings: widget.settings,
+            creds: widget.api.creds,
+            onChangeAccount: widget.onChangeAccount,
           ),
+          onNewConversation: _newConversation,
           banner: _invites.isEmpty
               ? null
               : InviteBanners(
