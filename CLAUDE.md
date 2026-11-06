@@ -61,7 +61,7 @@ Own local git repo on `main`, no remote. Nothing pushed. Prebuilt libwebrtc is l
 
 ## Chat, first slice (built 2026-11-06, user confirmed sending and receiving both ways)
 `lib/src/chat.dart` holds the model and `ChatThread` (long poll, paging, sending, read marker); `lib/src/chat_view.dart` holds the screens, with no new dependencies. Conversations and chat sit side by side down to 720 wide, then one pane at a time. Tapping a conversation now opens chat; calls start from its header. Reads never move the read marker: only `chatMarkRead` does, and only while the app reports resumed. `tala --chat-check` is a read-only server check that logs counts and message kinds, never names or text. It parsed 292 real messages with no failures. Unit and widget tests pass with a fake server. Not sent or marked read against the real server by me.
-Not built: Markdown, avatars, message search, tray, upload progress and cancel, drag and drop, editing or deleting messages. Call join/left system messages all show, which may be noisy. Focus: see `app:` lines in the log.
+Not built: Markdown, avatars, message search, tray, upload progress and cancel, drag and drop, editing or deleting messages. Call join/left system messages all show, which may be noisy. Focus: Linux does report it; the log showed `app: inactive` and `app: resumed` changing during use on 2026-11-06.
 
 ## Chat, second slice (built 2026-11-06)
 User confirmed on the real server 2026-11-06: replies, reactions, uploads, image previews. Desktop notifications not yet confirmed.
