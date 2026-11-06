@@ -59,7 +59,7 @@ Two-way audio and video confirmed by the user, Tala to a browser on the same ser
 Fresh-session test: the user confirmed a message popup while Tala was hidden in the tray. The process list showed it running as `tala --background` after login, so the autostart entry fired. Not yet confirmed by the user: no window appeared at login. If it fails, check `~/.config/tala/log.txt` and `~/.config/autostart/io.github.kz6fittycent.tala.desktop`.
 Waiting on a second tester: Decline, ring stopping when the caller hangs up or the user answers elsewhere, a long call, a call ringing a hidden window, Quit during a call, and the corrected call status.
 Also unconfirmed: no popup while the conversation is open and focused; tray Open clicked by hand; how the icon looks in the top bar and dock.
-Next proposed: internal signaling, snap packaging. Nothing is pushed and there's no remote; the GitHub repo doesn't exist yet, so Help and Source code links 404 until it and its wiki do.
+Next proposed: the snap (GitHub workflows), then internal signaling. Help links to the GitHub wiki, which needs a first page.
 The user is rethinking whether Flutter and the Mac and Windows versions are worth it (2026-11-06). Undecided; don't build for those systems until they decide.
 
 ## Menu, badge and federation (built 2026-11-06, awaiting the user's look)
@@ -89,7 +89,7 @@ Rooms with `isArchived` sit in a collapsed "Archived (N)" section at the bottom 
 Widget-tested only: the real server has 5 conversations and none archived (`--chat-check`; the Talk updates room, archived when checked earlier, is no longer listed), so the section has never been seen against real data.
 
 ## Repo (2026-11-06)
-Own local git repo on `main`, no remote. Nothing pushed. Prebuilt libwebrtc is left out: the plugin's CMake downloads it at the version in `third_party/flutter_webrtc/third_party/libwebrtc_version.ini` (checked against the sha256 there; the build fails if that release disappears). Older notes saying "not committed" or "no git repo" are out of date.
+Public at https://github.com/kz6fittycent/tala, branch `main`. Before the first push the local history was rewritten to use the GitHub noreply address (set in this repo's git config) and to take a family member out of these notes. This file is public: keep private details out of it. Commit freely; pushing needs the user's approval. Prebuilt libwebrtc is left out: the plugin's CMake downloads it at the version in `third_party/flutter_webrtc/third_party/libwebrtc_version.ini` (checked against the sha256 there; the build fails if that release disappears). Older notes saying "not committed" or "no git repo" are out of date.
 
 ## Chat, first slice (built 2026-11-06, user confirmed sending and receiving both ways)
 `lib/src/chat.dart` holds the model and `ChatThread` (long poll, paging, sending, read marker); `lib/src/chat_view.dart` holds the screens, with no new dependencies. Conversations and chat sit side by side down to 720 wide, then one pane at a time. Tapping a conversation now opens chat; calls start from its header. Reads never move the read marker: only `chatMarkRead` does, and only while the app reports resumed. `tala --chat-check` is a read-only server check that logs counts and message kinds, never names or text. It parsed 292 real messages with no failures. Unit and widget tests pass with a fake server. Not sent or marked read against the real server by me.
