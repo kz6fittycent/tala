@@ -12,6 +12,7 @@ class Server {
   final List<Map<String, dynamic>> shares = [];
   final Set<String> folders = {};
   final List<String?> ifNoneMatch = [];
+  final List<String> bodies = [];
 
   Future<void> start() async {
     http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -43,6 +44,14 @@ class Server {
     } else if (path.contains('/shares')) {
       shares.add(jsonDecode(utf8.decode(body)) as Map<String, dynamic>);
       _ocs(r, {});
+    } else if (path.contains('/chat/')) {
+      _ocs(r, {
+        'id': 9,
+        'systemMessage': 'message_edited',
+        'message': '',
+        'parent': {'id': 5, 'message': 'new text'},
+      });
+      bodies.add(utf8.decode(body));
     } else if (q.method == 'MKCOL') {
       folders.add(path);
       r.statusCode = 201;
@@ -57,6 +66,8 @@ class Server {
         stored[path] = body;
         r.statusCode = 201;
       }
+    } else if (path.contains('/participants/self')) {
+      _ocs(r, {});
     } else if (path.contains('/reaction/')) {
       _ocs(r, {});
     } else if (path.contains('/core/preview')) {
@@ -127,6 +138,27 @@ void main() {
         s.requests.single,
         'DELETE /ocs/v2.php/apps/spreed/api/v1/reaction/tok/5'
         '?reaction=${Uri.encodeQueryComponent('👍')}');
+  });
+
+  test('editing sends the text and returns the changed message', () async {
+    final m = await api.chatEdit('tok', 5, 'new text');
+    expect(s.requests.single, 'PUT /ocs/v2.php/apps/spreed/api/v1/chat/tok/5');
+    expect(jsonDecode(s.bodies.single), {'message': 'new text'});
+    expect(m!.id, 5);
+    expect(m.text, 'new text');
+  });
+
+  test('deleting targets the one message', () async {
+    final m = await api.chatDelete('tok', 5);
+    expect(
+        s.requests.single, 'DELETE /ocs/v2.php/apps/spreed/api/v1/chat/tok/5');
+    expect(m!.id, 5);
+  });
+
+  test('removing a chat leaves it, and never deletes the room', () async {
+    await api.leaveConversation('tok');
+    expect(s.requests.single,
+        'DELETE /ocs/v2.php/apps/spreed/api/v4/room/tok/participants/self');
   });
 
   test('fetches preview bytes', () async {

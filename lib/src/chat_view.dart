@@ -38,6 +38,7 @@ class ChatLayout extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onRefresh,
+    required this.onRemove,
     required this.conversation,
   });
 
@@ -46,31 +47,36 @@ class ChatLayout extends StatelessWidget {
   final Room? selected;
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
+  final ValueChanged<Room> onRemove;
   final Widget? conversation;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, box) {
-          final list = RoomList(
-            rooms: rooms,
-            error: roomsError,
-            selected: selected?.token,
-            onSelect: onSelect,
-            onRefresh: onRefresh,
-          );
-          if (box.maxWidth < _twoPaneWidth) {
-            return conversation ?? list;
-          }
-          return Row(children: [
-            SizedBox(width: _listWidth, child: list),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: conversation ??
-                  const Center(child: Text('Choose a conversation')),
-            ),
-          ]);
-        },
+    builder: (context, box) {
+      final list = RoomList(
+        rooms: rooms,
+        error: roomsError,
+        selected: selected?.token,
+        onSelect: onSelect,
+        onRefresh: onRefresh,
+        onRemove: onRemove,
       );
+      if (box.maxWidth < _twoPaneWidth) {
+        return conversation ?? list;
+      }
+      return Row(
+        children: [
+          SizedBox(width: _listWidth, child: list),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child:
+                conversation ??
+                const Center(child: Text('Choose a conversation')),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class RoomList extends StatelessWidget {
@@ -81,6 +87,7 @@ class RoomList extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onRefresh,
+    required this.onRemove,
   });
 
   final List<Room>? rooms;
@@ -88,51 +95,82 @@ class RoomList extends StatelessWidget {
   final String? selected;
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
+  final ValueChanged<Room> onRemove;
 
   @override
   Widget build(BuildContext context) {
     final items = rooms;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        child: Row(children: [
-          Expanded(
-            child: Text('Conversations',
-                style: Theme.of(context).textTheme.titleMedium),
-          ),
-          IconButton(
-              tooltip: 'Refresh',
-              icon: const Icon(Icons.refresh),
-              onPressed: onRefresh),
-        ]),
-      ),
-      if (error != null && items != null)
-        const _Banner('Can\'t reach the server. Retrying…'),
-      Expanded(
-        child: items == null
-            ? Center(
-                child: error != null
-                    ? Text('$error')
-                    : const CircularProgressIndicator())
-            : ListView.builder(
-                itemCount: items.length,
-                itemBuilder: (context, i) => _RoomTile(
-                  room: items[i],
-                  selected: items[i].token == selected,
-                  onTap: () => onSelect(items[i].token),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Conversations',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-      ),
-    ]);
+              IconButton(
+                tooltip: 'Refresh',
+                icon: const Icon(Icons.refresh),
+                onPressed: onRefresh,
+              ),
+            ],
+          ),
+        ),
+        if (error != null && items != null)
+          const _Banner('Can\'t reach the server. Retrying…'),
+        Expanded(
+          child: items == null
+              ? Center(
+                  child: error != null
+                      ? Text('$error')
+                      : const CircularProgressIndicator(),
+                )
+              : ListView.builder(
+                  itemCount: items.length,
+                  itemBuilder: (context, i) => _RoomTile(
+                    room: items[i],
+                    selected: items[i].token == selected,
+                    onTap: () => onSelect(items[i].token),
+                    onRemove: () => onRemove(items[i]),
+                  ),
+                ),
+        ),
+      ],
+    );
   }
 }
 
 class _RoomTile extends StatelessWidget {
-  const _RoomTile(
-      {required this.room, required this.selected, required this.onTap});
+  const _RoomTile({
+    required this.room,
+    required this.selected,
+    required this.onTap,
+    required this.onRemove,
+  });
   final Room room;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  Future<void> _menu(BuildContext context, Offset at) async {
+    final choice = await _showMenuAt<String>(context, at, [
+      PopupMenuItem(
+        value: 'remove',
+        enabled: room.canLeave,
+        child: Text(
+          room.canLeave
+              ? 'Remove chat…'
+              : 'Remove chat (you\'re the only moderator)',
+        ),
+      ),
+    ]);
+    if (choice == 'remove') onRemove();
+  }
 
   String get _preview {
     final m = room.lastMessage;
@@ -147,36 +185,75 @@ class _RoomTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final unread = room.unread > 0;
-    return ListTile(
-      selected: selected,
-      selectedTileColor: scheme.secondaryContainer,
-      leading: _Initial(room.name),
-      title: Text(room.name,
+    return GestureDetector(
+      onSecondaryTapUp: (d) => _menu(context, d.globalPosition),
+      child: ListTile(
+        selected: selected,
+        selectedTileColor: scheme.secondaryContainer,
+        leading: _Initial(room.name),
+        title: Text(
+          room.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: unread ? const TextStyle(fontWeight: FontWeight.bold) : null),
-      subtitle: Text(_preview, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (room.hasCall)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Icon(Icons.call,
-                size: 18,
-                color: scheme.primary,
-                semanticLabel: 'Call in progress'),
-          ),
-        if (unread)
-          Badge(
-            label: Text('${room.unread}'),
-            backgroundColor:
-                room.unreadMention ? scheme.error : scheme.primary,
-            textColor:
-                room.unreadMention ? scheme.onError : scheme.onPrimary,
-          ),
-      ]),
-      onTap: onTap,
+          style: unread ? const TextStyle(fontWeight: FontWeight.bold) : null,
+        ),
+        subtitle: Text(_preview, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (room.hasCall)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Icon(
+                  Icons.call,
+                  size: 18,
+                  color: scheme.primary,
+                  semanticLabel: 'Call in progress',
+                ),
+              ),
+            if (unread)
+              Badge(
+                label: Text('${room.unread}'),
+                backgroundColor: room.unreadMention
+                    ? scheme.error
+                    : scheme.primary,
+                textColor: room.unreadMention
+                    ? scheme.onError
+                    : scheme.onPrimary,
+              ),
+            Builder(
+              builder: (context) => IconButton(
+                tooltip: 'Conversation options',
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.more_vert),
+                onPressed: () => _menu(context, _centerOf(context)),
+              ),
+            ),
+          ],
+        ),
+        onTap: onTap,
+      ),
     );
   }
+}
+
+Future<T?> _showMenuAt<T>(
+  BuildContext context,
+  Offset at,
+  List<PopupMenuEntry<T>> items,
+) {
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+  return showMenu<T>(
+    context: context,
+    position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
+    items: items,
+  );
+}
+
+Offset _centerOf(BuildContext context) {
+  final box = context.findRenderObject()! as RenderBox;
+  return box.localToGlobal(box.size.center(Offset.zero));
 }
 
 class _Initial extends StatelessWidget {
@@ -184,10 +261,10 @@ class _Initial extends StatelessWidget {
   final String name;
   @override
   Widget build(BuildContext context) => ExcludeSemantics(
-        child: CircleAvatar(
-          child: Text(name.isEmpty ? '?' : name.characters.first.toUpperCase()),
-        ),
-      );
+    child: CircleAvatar(
+      child: Text(name.isEmpty ? '?' : name.characters.first.toUpperCase()),
+    ),
+  );
 }
 
 class _Banner extends StatelessWidget {
@@ -227,20 +304,28 @@ class ConversationPane extends StatefulWidget {
 }
 
 class _ConversationPaneState extends State<ConversationPane> {
-  late final ChatThread _thread = ChatThread(widget.source, widget.room.token,
-      lastRead: widget.room.lastRead);
+  late final ChatThread _thread = ChatThread(
+    widget.source,
+    widget.room.token,
+    lastRead: widget.room.lastRead,
+  );
   late final AppLifecycleListener _lifecycle;
 
   /// Fixed when the conversation opens, so the divider stays put as it's read.
   late final int _lastReadAtOpen = widget.room.lastRead;
   late final bool _hadUnread = widget.room.unread > 0;
-  late final TextEditingController _input =
-      TextEditingController(text: widget.drafts[widget.room.token] ?? '');
+  late final TextEditingController _input = TextEditingController(
+    text: widget.drafts[widget.room.token] ?? '',
+  );
   final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
   final Map<int, Future<Uint8List>> _previews = {};
   ChatMessage? _replyTo;
   bool _canUpload = false;
+  ChatMessage? _editing;
+
+  /// What was in the composer before editing began, put back afterward.
+  String _draftBeforeEdit = '';
 
   @override
   void initState() {
@@ -251,23 +336,87 @@ class _ConversationPaneState extends State<ConversationPane> {
       ..active = state == null || state == AppLifecycleState.resumed
       ..start();
     _scroll.addListener(_onScroll);
-    _input.addListener(
-        () => widget.drafts[widget.room.token] = _input.text);
+    _input.addListener(() {
+      if (_editing == null) widget.drafts[widget.room.token] = _input.text;
+    });
     widget.source.chatUploadsAllowed().then((allowed) {
       if (mounted) setState(() => _canUpload = allowed);
     }, onError: (Object e) => log('chat: attachment settings: $e'));
   }
 
   void _startReply(ChatMessage m) {
+    if (_editing != null) _endEdit();
     setState(() => _replyTo = m);
     _inputFocus.requestFocus();
+  }
+
+  void _startEdit(ChatMessage m) {
+    if (_editing == null) _draftBeforeEdit = _input.text;
+    setState(() {
+      _replyTo = null;
+      _editing = m;
+    });
+    _input.text = m.editSource;
+    _inputFocus.requestFocus();
+  }
+
+  void _endEdit() {
+    setState(() => _editing = null);
+    _input.text = _draftBeforeEdit;
+  }
+
+  void _notify(String message) =>
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _saveEdit(ChatMessage m) async {
+    final error = await _thread.editMessage(m.id, _input.text);
+    if (!mounted) return;
+    if (error != null) {
+      // The text stays in the composer, so nothing typed is lost.
+      _notify(error);
+    } else if (identical(_editing, m)) {
+      _endEdit();
+    }
+  }
+
+  Future<void> _confirmDelete(ChatMessage m) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this message?'),
+        content: const Text(
+          'It will be removed for everyone in this '
+          'conversation. This can\'t be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final error = await _thread.deleteMessage(m.id);
+    if (!mounted) return;
+    if (error != null) {
+      _notify(error);
+    } else if (_editing?.id == m.id) {
+      _endEdit();
+    }
   }
 
   Future<void> _react(ChatMessage m, String emoji) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (!await _thread.toggleReaction(m.id, emoji)) {
       messenger?.showSnackBar(
-          const SnackBar(content: Text('Couldn\'t update that reaction')));
+        const SnackBar(content: Text('Couldn\'t update that reaction')),
+      );
     }
   }
 
@@ -287,6 +436,11 @@ class _ConversationPaneState extends State<ConversationPane> {
   }
 
   void _send() {
+    final editing = _editing;
+    if (editing != null) {
+      _saveEdit(editing);
+      return;
+    }
     final text = _input.text;
     if (text.trim().isEmpty) return;
     final reply = _replyTo;
@@ -299,10 +453,15 @@ class _ConversationPaneState extends State<ConversationPane> {
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape &&
-        _replyTo != null) {
-      setState(() => _replyTo = null);
-      return KeyEventResult.handled;
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_editing != null) {
+        _endEdit();
+        return KeyEventResult.handled;
+      }
+      if (_replyTo != null) {
+        setState(() => _replyTo = null);
+        return KeyEventResult.handled;
+      }
     }
     if (event is! KeyDownEvent ||
         (event.logicalKey != LogicalKeyboardKey.enter &&
@@ -339,38 +498,52 @@ class _ConversationPaneState extends State<ConversationPane> {
             elevation: 1,
             child: Padding(
               padding: const EdgeInsets.all(8),
-              child: Row(children: [
-                if (!twoPane)
-                  IconButton(
+              child: Row(
+                children: [
+                  if (!twoPane)
+                    IconButton(
                       tooltip: 'Back to conversations',
                       icon: const Icon(Icons.arrow_back),
-                      onPressed: widget.onBack),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(room.name,
+                      onPressed: widget.onBack,
+                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      room.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium),
-                ),
-                if (room.canCall)
-                  room.hasCall
-                      ? FilledButton.icon(
-                          icon: const Icon(Icons.call),
-                          label: const Text('Join call'),
-                          onPressed: widget.onCall)
-                      : IconButton(
-                          tooltip: 'Start a call',
-                          icon: const Icon(Icons.call),
-                          onPressed: widget.onCall),
-              ]),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  if (room.canCall)
+                    room.hasCall
+                        ? FilledButton.icon(
+                            icon: const Icon(Icons.call),
+                            label: const Text('Join call'),
+                            onPressed: widget.onCall,
+                          )
+                        : IconButton(
+                            tooltip: 'Start a call',
+                            icon: const Icon(Icons.call),
+                            onPressed: widget.onCall,
+                          ),
+                ],
+              ),
             ),
           ),
           if (_thread.problem != null) _Banner(_thread.problem!),
           Expanded(child: _body(context)),
           if (room.canChat && !_thread.gone) ...[
-            if (_replyTo != null)
-              _ReplyBar(
-                message: _replyTo!,
+            if (_editing != null)
+              _ComposerBar(
+                text: 'Editing your message',
+                cancelLabel: 'Cancel edit',
+                onCancel: _endEdit,
+              )
+            else if (_replyTo != null)
+              _ComposerBar(
+                text: 'Replying to ${_replyTo!.actorName}: ${_replyTo!.text}',
+                cancelLabel: 'Cancel reply',
                 onCancel: () => setState(() => _replyTo = null),
               ),
             _Composer(
@@ -378,14 +551,15 @@ class _ConversationPaneState extends State<ConversationPane> {
               focus: _inputFocus,
               onKey: _onKey,
               onSend: _send,
-              onAttach: _canUpload ? _attach : null,
+              onAttach: _canUpload && _editing == null ? _attach : null,
             ),
-          ]
-          else if (!room.canChat)
+          ] else if (!room.canChat)
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('You can\'t send messages here.',
-                  textAlign: TextAlign.center),
+              child: Text(
+                'You can\'t send messages here.',
+                textAlign: TextAlign.center,
+              ),
             ),
         ],
       ),
@@ -415,11 +589,13 @@ class _ConversationPaneState extends State<ConversationPane> {
   List<Widget> _buildRows(BuildContext context) {
     final out = <Widget>[];
     for (final o in _thread.outgoing.reversed) {
-      out.add(_OutgoingBubble(
-        message: o,
-        onRetry: () => _thread.retry(o),
-        onDiscard: () => _thread.discard(o),
-      ));
+      out.add(
+        _OutgoingBubble(
+          message: o,
+          onRetry: () => _thread.retry(o),
+          onDiscard: () => _thread.discard(o),
+        ),
+      );
     }
     final messages = _thread.messages;
     final selfId = widget.room.selfId;
@@ -427,37 +603,48 @@ class _ConversationPaneState extends State<ConversationPane> {
       final m = messages[i];
       final prev = i > 0 ? messages[i - 1] : null;
       final sameDay = prev != null && DateUtils.isSameDay(prev.time, m.time);
-      final grouped = sameDay &&
+      final grouped =
+          sameDay &&
           !prev.isSystem &&
           !m.isSystem &&
           prev.actorType == m.actorType &&
           prev.actorId == m.actorId &&
           m.timestamp - prev.timestamp < 300;
-      out.add(m.isSystem
-          ? _SystemRow(m)
-          : _MessageBubble(
-              message: m,
-              own: m.actorType == 'users' && m.actorId == selfId,
-              showName: !grouped,
-              canInteract: widget.room.canChat,
-              onReply: () => _startReply(m),
-              onReact: (emoji) => _react(m, emoji),
-              preview: (id) => _previews[id] ??= widget.source.chatPreview(id),
-            ));
-      final firstUnread = _hadUnread &&
+      out.add(
+        m.isSystem
+            ? _SystemRow(m)
+            : _MessageBubble(
+                message: m,
+                own: m.actorType == 'users' && m.actorId == selfId,
+                showName: !grouped,
+                canInteract: widget.room.canChat,
+                onReply: () => _startReply(m),
+                onReact: (emoji) => _react(m, emoji),
+                onEdit: () => _startEdit(m),
+                onDelete: () => _confirmDelete(m),
+                canModerate: widget.room.isModerator,
+                preview: (id) =>
+                    _previews[id] ??= widget.source.chatPreview(id),
+              ),
+      );
+      final firstUnread =
+          _hadUnread &&
           m.id > _lastReadAtOpen &&
           (prev == null || prev.id <= _lastReadAtOpen);
       if (firstUnread) out.add(const _Divider('New messages'));
       if (!sameDay) {
-        out.add(_Divider(
-            MaterialLocalizations.of(context).formatMediumDate(m.time)));
+        out.add(
+          _Divider(MaterialLocalizations.of(context).formatMediumDate(m.time)),
+        );
       }
     }
     if (_thread.loadingOlder) {
-      out.add(const Padding(
-        padding: EdgeInsets.all(12),
-        child: Center(child: CircularProgressIndicator()),
-      ));
+      out.add(
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
     }
     return out;
   }
@@ -479,42 +666,47 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(8),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          if (onAttach != null) ...[
-            IconButton(
-                tooltip: 'Attach files',
-                icon: const Icon(Icons.attach_file),
-                onPressed: onAttach),
-            const SizedBox(width: 4),
-          ],
-          Expanded(
-            child: Focus(
-              onKeyEvent: onKey,
-              skipTraversal: true,
-              child: TextField(
-                controller: controller,
-                focusNode: focus,
-                autofocus: true,
-                minLines: 1,
-                maxLines: 6,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: 'Write a message',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
+    padding: const EdgeInsets.all(8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (onAttach != null) ...[
+          IconButton(
+            tooltip: 'Attach files',
+            icon: const Icon(Icons.attach_file),
+            onPressed: onAttach,
+          ),
+          const SizedBox(width: 4),
+        ],
+        Expanded(
+          child: Focus(
+            onKeyEvent: onKey,
+            skipTraversal: true,
+            child: TextField(
+              controller: controller,
+              focusNode: focus,
+              autofocus: true,
+              minLines: 1,
+              maxLines: 6,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              decoration: const InputDecoration(
+                hintText: 'Write a message',
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-              tooltip: 'Send',
-              icon: const Icon(Icons.send),
-              onPressed: onSend),
-        ]),
-      );
+        ),
+        const SizedBox(width: 8),
+        IconButton.filled(
+          tooltip: 'Send',
+          icon: const Icon(Icons.send),
+          onPressed: onSend,
+        ),
+      ],
+    ),
+  );
 }
 
 class _Divider extends StatelessWidget {
@@ -522,16 +714,18 @@ class _Divider extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(children: [
-          const Expanded(child: Divider()),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(text, style: Theme.of(context).textTheme.labelMedium),
-          ),
-          const Expanded(child: Divider()),
-        ]),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    child: Row(
+      children: [
+        const Expanded(child: Divider()),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(text, style: Theme.of(context).textTheme.labelMedium),
+        ),
+        const Expanded(child: Divider()),
+      ],
+    ),
+  );
 }
 
 class _SystemRow extends StatelessWidget {
@@ -542,17 +736,25 @@ class _SystemRow extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      child: Text(message.text,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      child: Text(
+        message.text,
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }
 
-class _ReplyBar extends StatelessWidget {
-  const _ReplyBar({required this.message, required this.onCancel});
-  final ChatMessage message;
+class _ComposerBar extends StatelessWidget {
+  const _ComposerBar({
+    required this.text,
+    required this.cancelLabel,
+    required this.onCancel,
+  });
+  final String text;
+  final String cancelLabel;
   final VoidCallback onCancel;
   @override
   Widget build(BuildContext context) {
@@ -560,21 +762,23 @@ class _ReplyBar extends StatelessWidget {
     return Container(
       color: theme.colorScheme.surfaceContainerHigh,
       padding: const EdgeInsets.only(left: 16, right: 8),
-      child: Row(children: [
-        Expanded(
-          child: Text(
-            'Replying to ${message.actorName}: ${message.text}'
-                .replaceAll('\n', ' '),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              text.replaceAll('\n', ' '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
           ),
-        ),
-        IconButton(
-            tooltip: 'Cancel reply',
+          IconButton(
+            tooltip: cancelLabel,
             icon: const Icon(Icons.close),
-            onPressed: onCancel),
-      ]),
+            onPressed: onCancel,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -592,8 +796,9 @@ class _Bubble extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 640),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color:
-                own ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+            color: own
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Padding(
@@ -607,8 +812,9 @@ class _Bubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       child: Row(
-        mainAxisAlignment:
-            own ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: own
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         children: [
           if (own && side != null) side,
           bubble,
@@ -628,10 +834,12 @@ class _MessageActions extends StatefulWidget {
     required this.visible,
     required this.onReply,
     required this.onReact,
+    required this.onMore,
   });
   final bool visible;
   final VoidCallback? onReply;
   final ValueChanged<String>? onReact;
+  final ValueChanged<Offset> onMore;
   @override
   State<_MessageActions> createState() => _MessageActionsState();
 }
@@ -641,34 +849,48 @@ class _MessageActionsState extends State<_MessageActions> {
 
   @override
   Widget build(BuildContext context) => Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        onFocusChange: (f) => setState(() => _focused = f),
-        child: Opacity(
-          opacity: widget.visible || _focused ? 1 : 0,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (widget.onReply != null)
-              IconButton(
-                  tooltip: 'Reply',
-                  iconSize: 18,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.reply),
-                  onPressed: widget.onReply),
-            if (widget.onReact != null)
-              PopupMenuButton<String>(
-                tooltip: 'Add a reaction',
-                iconSize: 18,
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.add_reaction_outlined),
-                onSelected: widget.onReact,
-                itemBuilder: (context) => [
-                  for (final e in _quickReactions)
-                    PopupMenuItem(value: e, child: Text(e)),
-                ],
-              ),
-          ]),
-        ),
-      );
+    canRequestFocus: false,
+    skipTraversal: true,
+    onFocusChange: (f) => setState(() => _focused = f),
+    child: Opacity(
+      opacity: widget.visible || _focused ? 1 : 0,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.onReply != null)
+            IconButton(
+              tooltip: 'Reply',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.reply),
+              onPressed: widget.onReply,
+            ),
+          if (widget.onReact != null)
+            PopupMenuButton<String>(
+              tooltip: 'Add a reaction',
+              iconSize: 18,
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.add_reaction_outlined),
+              onSelected: widget.onReact,
+              itemBuilder: (context) => [
+                for (final e in _quickReactions)
+                  PopupMenuItem(value: e, child: Text(e)),
+              ],
+            ),
+          // The same menu as right-click, reachable from the keyboard.
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: 'More actions',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.more_horiz),
+              onPressed: () => widget.onMore(_centerOf(context)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Reactions extends StatelessWidget {
@@ -680,21 +902,25 @@ class _Reactions extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Wrap(spacing: 4, runSpacing: 4, children: [
-        for (final e in message.reactions.entries)
-          ActionChip(
-            label: Text('${e.key} ${e.value}'),
-            visualDensity: VisualDensity.compact,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            tooltip: message.reactionsSelf.contains(e.key)
-                ? 'Remove your reaction'
-                : 'Add this reaction',
-            backgroundColor: message.reactionsSelf.contains(e.key)
-                ? scheme.secondaryContainer
-                : null,
-            onPressed: onReact == null ? null : () => onReact!(e.key),
-          ),
-      ]),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          for (final e in message.reactions.entries)
+            ActionChip(
+              label: Text('${e.key} ${e.value}'),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              tooltip: message.reactionsSelf.contains(e.key)
+                  ? 'Remove your reaction'
+                  : 'Add this reaction',
+              backgroundColor: message.reactionsSelf.contains(e.key)
+                  ? scheme.secondaryContainer
+                  : null,
+              onPressed: onReact == null ? null : () => onReact!(e.key),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -751,8 +977,14 @@ class _MessageBubble extends StatefulWidget {
     required this.canInteract,
     required this.onReply,
     required this.onReact,
+    required this.onEdit,
+    required this.onDelete,
+    required this.canModerate,
     required this.preview,
   });
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final bool canModerate;
   final ChatMessage message;
   final bool own;
   final bool showName;
@@ -768,52 +1000,95 @@ class _MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<_MessageBubble> {
   bool _hover = false;
 
+  Future<void> _menu(Offset at) async {
+    final message = widget.message;
+    final canReply = widget.canInteract && message.isReplyable;
+    final canEdit = widget.canInteract && widget.own && message.canEdit;
+    final canDelete =
+        widget.canInteract &&
+        message.canDelete &&
+        (widget.own || widget.canModerate);
+    final text = message.text;
+    final choice = await _showMenuAt<String>(context, at, [
+      if (canReply) const PopupMenuItem(value: 'reply', child: Text('Reply')),
+      if (text.isNotEmpty)
+        const PopupMenuItem(value: 'copy', child: Text('Copy text')),
+      if (canEdit) const PopupMenuItem(value: 'edit', child: Text('Edit')),
+      if (canDelete)
+        const PopupMenuItem(value: 'delete', child: Text('Delete…')),
+    ]);
+    switch (choice) {
+      case 'reply':
+        widget.onReply();
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: text));
+      case 'edit':
+        widget.onEdit();
+      case 'delete':
+        widget.onDelete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
     final theme = Theme.of(context);
     final small = theme.textTheme.bodySmall;
     final time = MaterialLocalizations.of(context).formatTimeOfDay(
-        TimeOfDay.fromDateTime(message.time),
-        alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
+      TimeOfDay.fromDateTime(message.time),
+      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
     final parent = message.parent;
     final canReply = widget.canInteract && message.isReplyable;
     final canReact = widget.canInteract && message.canReact;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      child: _Bubble(
-        own: widget.own,
-        actions: canReply || canReact
-            ? _MessageActions(
-                visible: _hover,
-                onReply: canReply ? widget.onReply : null,
-                onReact: canReact ? widget.onReact : null,
-              )
-            : null,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (widget.showName && !widget.own)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Text(
-                  message.actorName.isEmpty ? 'Guest' : message.actorName,
-                  style: small?.copyWith(fontWeight: FontWeight.bold)),
-            ),
-          if (parent != null && !message.isDeleted)
-            _Quote(parent: parent, deleted: message.parentDeleted),
-          for (final s in message.segments)
-            if (s.previewFileId != null)
-              _ImagePreview(segment: s, bytes: widget.preview(s.previewFileId!)),
-          _MessageText(message.segments, italic: message.isDeleted),
-          if (message.reactions.isNotEmpty)
-            _Reactions(
-                message: message,
-                onReact: widget.canInteract ? widget.onReact : null),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(message.edited ? '$time · edited' : time, style: small),
+      child: GestureDetector(
+        onSecondaryTapUp: (d) => _menu(d.globalPosition),
+        child: _Bubble(
+          own: widget.own,
+          actions: _MessageActions(
+            visible: _hover,
+            onReply: canReply ? widget.onReply : null,
+            onReact: canReact ? widget.onReact : null,
+            onMore: _menu,
           ),
-        ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.showName && !widget.own)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    message.actorName.isEmpty ? 'Guest' : message.actorName,
+                    style: small?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              if (parent != null && !message.isDeleted)
+                _Quote(parent: parent, deleted: message.parentDeleted),
+              for (final s in message.segments)
+                if (s.previewFileId != null)
+                  _ImagePreview(
+                    segment: s,
+                    bytes: widget.preview(s.previewFileId!),
+                  ),
+              _MessageText(message.segments, italic: message.isDeleted),
+              if (message.reactions.isNotEmpty)
+                _Reactions(
+                  message: message,
+                  onReact: widget.canInteract ? widget.onReact : null,
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  message.edited ? '$time · edited' : time,
+                  style: small,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -830,8 +1105,9 @@ class _Quote extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.only(left: 8),
       decoration: BoxDecoration(
-        border:
-            Border(left: BorderSide(color: theme.colorScheme.primary, width: 3)),
+        border: Border(
+          left: BorderSide(color: theme.colorScheme.primary, width: 3),
+        ),
       ),
       child: Text(
         deleted ? 'Deleted message' : '${parent.actorName}: ${parent.text}',
@@ -876,20 +1152,28 @@ class _MessageTextState extends State<_MessageText> {
       _taps.add(tap);
     }
     final link = TextStyle(
-        color: scheme.primary, decoration: TextDecoration.underline);
+      color: scheme.primary,
+      decoration: TextDecoration.underline,
+    );
     final mouse = tap != null ? SystemMouseCursors.click : MouseCursor.defer;
     return switch (s.kind) {
       SegmentKind.text => TextSpan(text: s.text),
       SegmentKind.mention => TextSpan(
-          text: '@${s.text}',
-          style: const TextStyle(fontWeight: FontWeight.bold)),
+        text: '@${s.text}',
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
       SegmentKind.file => TextSpan(
-          text: '📎 ${s.text}',
-          style: tap != null ? link : null,
-          recognizer: tap,
-          mouseCursor: mouse),
+        text: '📎 ${s.text}',
+        style: tap != null ? link : null,
+        recognizer: tap,
+        mouseCursor: mouse,
+      ),
       SegmentKind.link => TextSpan(
-          text: s.text, style: link, recognizer: tap, mouseCursor: mouse),
+        text: s.text,
+        style: link,
+        recognizer: tap,
+        mouseCursor: mouse,
+      ),
     };
   }
 
@@ -897,16 +1181,23 @@ class _MessageTextState extends State<_MessageText> {
   Widget build(BuildContext context) {
     _clearTaps();
     final theme = Theme.of(context);
-    return Text.rich(TextSpan(
-      style: widget.italic ? const TextStyle(fontStyle: FontStyle.italic) : null,
-      children: [for (final s in widget.segments) _span(s, theme)],
-    ));
+    return Text.rich(
+      TextSpan(
+        style: widget.italic
+            ? const TextStyle(fontStyle: FontStyle.italic)
+            : null,
+        children: [for (final s in widget.segments) _span(s, theme)],
+      ),
+    );
   }
 }
 
 class _OutgoingBubble extends StatelessWidget {
-  const _OutgoingBubble(
-      {required this.message, required this.onRetry, required this.onDiscard});
+  const _OutgoingBubble({
+    required this.message,
+    required this.onRetry,
+    required this.onDiscard,
+  });
   final OutgoingMessage message;
   final VoidCallback onRetry;
   final VoidCallback onDiscard;
@@ -917,20 +1208,31 @@ class _OutgoingBubble extends StatelessWidget {
     final failed = message.state == SendState.failed;
     return _Bubble(
       own: true,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        Text(message.filePath != null ? '📎 ${message.text}' : message.text),
-        if (!failed)
-          Text(message.filePath != null ? 'Uploading…' : 'Sending…',
-              style: theme.textTheme.bodySmall)
-        else
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(message.error ?? 'Not sent',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.error)),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-            TextButton(onPressed: onDiscard, child: const Text('Discard')),
-          ]),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(message.filePath != null ? '📎 ${message.text}' : message.text),
+          if (!failed)
+            Text(
+              message.filePath != null ? 'Uploading…' : 'Sending…',
+              style: theme.textTheme.bodySmall,
+            )
+          else
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  message.error ?? 'Not sent',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+                TextButton(onPressed: onRetry, child: const Text('Retry')),
+                TextButton(onPressed: onDiscard, child: const Text('Discard')),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }

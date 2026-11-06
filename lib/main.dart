@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'src/call.dart';
+import 'src/chat.dart';
 import 'src/camera_cycle.dart';
 import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
@@ -185,6 +186,46 @@ class _RoomsPageState extends State<RoomsPage> {
     }
   }
 
+  Future<void> _removeRoom(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${room.name}?'),
+        content: Text(room.type == 1
+            ? 'This removes the chat from your list, and you lose access to '
+                'its messages. It may come back if they message you.'
+            : 'You\'ll leave this conversation and lose access to its '
+                'messages. It carries on for everyone else.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.api.leaveConversation(room.token);
+    } catch (e) {
+      log('rooms: leaving failed: $e');
+      messenger.showSnackBar(SnackBar(
+        content: Text(e is ApiException && e.status == 400
+            ? 'You\'re the only moderator. Make someone else a moderator '
+                'first.'
+            : 'Couldn\'t remove that conversation.'),
+      ));
+      return;
+    }
+    _drafts.remove(room.token);
+    if (!mounted) return;
+    if (_selected == room.token) setState(() => _selected = null);
+    await _refreshRooms();
+  }
+
   void _select(String? token) {
     if (token == _selected) return;
     setState(() => _selected = token);
@@ -274,6 +315,7 @@ class _RoomsPageState extends State<RoomsPage> {
           selected: selected,
           onSelect: _select,
           onRefresh: _refreshRooms,
+          onRemove: _removeRoom,
           conversation: selected == null
               ? null
               : ConversationPane(

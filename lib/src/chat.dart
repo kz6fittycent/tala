@@ -101,6 +101,19 @@ List<Segment> parseMessage(String message, Map<String, dynamic> params) {
   return out;
 }
 
+/// The text to put back in the composer for editing. Mentions must return to
+/// the `@"id"` form the server reads, or saving would turn them into plain text.
+String editableText(String message, Map<String, dynamic> params) =>
+    message.replaceAllMapped(_placeholder, (m) {
+      final p = params[m.group(1)];
+      if (p is! Map || p['name'] is! String) return m.group(0)!;
+      if (_mentionTypes.contains(p['type'])) {
+        final id = p['mention-id'] ?? p['id'];
+        if (id is String) return '@"$id"';
+      }
+      return p['name'] as String;
+    });
+
 /// The server sends an empty JSON list instead of an empty object here.
 Map<String, dynamic> _map(Object? v) =>
     v is Map ? v.cast<String, dynamic>() : const {};
@@ -122,10 +135,13 @@ class ChatMessage {
     this.isReplyable = false,
     this.reactions = const {},
     this.reactionsSelf = const [],
+    this.editSource = '',
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) {
     final parent = _map(j['parent']);
+    final raw = j['message'] as String? ?? '';
+    final params = _map(j['messageParameters']);
     final hasParent = parent['id'] is int;
     return ChatMessage(
       id: j['id'] as int? ?? 0,
@@ -133,8 +149,8 @@ class ChatMessage {
       actorId: j['actorId'] as String? ?? '',
       actorName: j['actorDisplayName'] as String? ?? '',
       timestamp: j['timestamp'] as int? ?? 0,
-      segments: parseMessage(
-          j['message'] as String? ?? '', _map(j['messageParameters'])),
+      segments: parseMessage(raw, params),
+      editSource: editableText(raw, params),
       systemKind: j['systemMessage'] as String? ?? '',
       type: j['messageType'] as String? ?? 'comment',
       referenceId: j['referenceId'] as String? ?? '',
@@ -168,6 +184,7 @@ class ChatMessage {
   final bool isReplyable;
   final Map<String, int> reactions;
   final List<String> reactionsSelf;
+  final String editSource;
 
   String get text => segments.map((s) => s.text).join();
   bool get isSystem => systemKind.isNotEmpty || type == 'system';
@@ -180,6 +197,17 @@ class ChatMessage {
       DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
 
   bool get canReact => !isSystem && !isDeleted;
+
+  /// Whether this kind of message can be deleted. The server still checks who
+  /// is asking.
+  bool get canDelete => !isSystem && !isDeleted;
+
+  /// Attachments are left out: only their caption could change, and Tala
+  /// doesn't add captions.
+  bool get canEdit =>
+      type == 'comment' &&
+      !isSystem &&
+      segments.every((s) => s.kind != SegmentKind.file);
 
   /// A copy with the user's own [emoji] added or removed.
   ChatMessage withOwnReaction(String emoji, {required bool add}) {
@@ -204,6 +232,7 @@ class ChatMessage {
       edited: edited,
       parentDeleted: parentDeleted,
       isReplyable: isReplyable,
+      editSource: editSource,
       reactions: counts,
       reactionsSelf: add
           ? [...reactionsSelf, emoji]
@@ -232,6 +261,10 @@ abstract class ChatSource {
   Future<void> chatMarkRead(String token, int id);
   Future<void> chatReact(String token, int messageId, String emoji,
       {required bool remove});
+
+  /// These return the changed message, when the server includes it.
+  Future<ChatMessage?> chatEdit(String token, int messageId, String text);
+  Future<ChatMessage?> chatDelete(String token, int messageId);
 
   /// Whether this server lets the user attach files to chats.
   Future<bool> chatUploadsAllowed();
@@ -482,6 +515,47 @@ class ChatThread extends ChangeNotifier {
       _changed();
       return false;
     }
+  }
+
+  /// Saves new text for a message. Returns why it failed, or null on success.
+  Future<String?> editMessage(int messageId, String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return 'A message can\'t be empty.';
+    if (trimmed == _byId[messageId]?.editSource.trim()) return null;
+    try {
+      _applyChange(await _source.chatEdit(token, messageId, trimmed));
+      return null;
+    } catch (e) {
+      log('chat: edit failed: $e');
+      return switch (_statusOf(e)) {
+        400 => 'This message can\'t be edited. It may be over 24 hours old.',
+        403 => 'You can\'t edit this message.',
+        404 => 'This message no longer exists.',
+        _ => 'Couldn\'t save the change.',
+      };
+    }
+  }
+
+  /// Deletes a message for everyone. Returns why it failed, or null on success.
+  Future<String?> deleteMessage(int messageId) async {
+    try {
+      _applyChange(await _source.chatDelete(token, messageId));
+      return null;
+    } catch (e) {
+      log('chat: delete failed: $e');
+      return switch (_statusOf(e)) {
+        400 => 'This message is too old to delete.',
+        403 => 'You can\'t delete this message.',
+        404 => 'This message no longer exists.',
+        _ => 'Couldn\'t delete the message.',
+      };
+    }
+  }
+
+  void _applyChange(ChatMessage? changed) {
+    if (changed == null || _disposed || !_byId.containsKey(changed.id)) return;
+    _byId[changed.id] = changed;
+    _changed();
   }
 
   Future<void> retry(OutgoingMessage o) async {

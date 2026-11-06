@@ -48,6 +48,8 @@ class Room {
     this.canCall = true,
     this.selfId = '',
     this.lastMessage,
+    this.canLeave = true,
+    this.isModerator = false,
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -76,6 +78,11 @@ class Room {
           type != 6 &&
           (hasCall || r['canStartCall'] != false),
       selfId: r['actorId'] as String? ?? '',
+      // The last moderator has to promote someone before leaving.
+      canLeave: r['canLeaveConversation'] != false,
+      // Both people own a one-to-one, but neither can delete the other's words.
+      isModerator:
+          type != 1 && const {1, 2, 6}.contains(r['participantType']),
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -95,6 +102,8 @@ class Room {
   final bool canCall;
   final String selfId;
   final ChatMessage? lastMessage;
+  final bool canLeave;
+  final bool isModerator;
 }
 
 class SignalingSettings {
@@ -203,6 +212,27 @@ class NcApi implements CallSource, ChatSource {
     });
     return ChatMessage.fromJson((d as Map).cast<String, dynamic>());
   }
+
+  /// The response is a hidden system message whose parent is the changed one.
+  ChatMessage? _changedMessage(dynamic d) => d is Map
+      ? ChatMessage.fromJson(d.cast<String, dynamic>()).parent
+      : null;
+
+  @override
+  Future<ChatMessage?> chatEdit(
+      String token, int messageId, String text) async {
+    return _changedMessage(await _ocs('PUT', '$_chatV1/$token/$messageId',
+        body: {'message': text}));
+  }
+
+  @override
+  Future<ChatMessage?> chatDelete(String token, int messageId) async {
+    return _changedMessage(await _ocs('DELETE', '$_chatV1/$token/$messageId'));
+  }
+
+  /// Removes only this user. The conversation carries on for everyone else.
+  Future<void> leaveConversation(String token) =>
+      _ocs('DELETE', '$_talkV4/room/$token/participants/self');
 
   /// Called with each fresh list of chat notifications.
   void Function(List<ChatNote> notes)? onChatNotes;

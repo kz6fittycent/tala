@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,27 @@ class FakeSource implements ChatSource {
     final c = Completer<List<ChatMessage>>();
     waits.add(c);
     return c.future;
+  }
+
+  final List<String> edits = [];
+  final List<int> deletes = [];
+  ChatMessage? changed;
+  Object? changeError;
+
+  @override
+  Future<ChatMessage?> chatEdit(String token, int id, String text) async {
+    edits.add('$id:$text');
+    final e = changeError;
+    if (e != null) throw e;
+    return changed;
+  }
+
+  @override
+  Future<ChatMessage?> chatDelete(String token, int id) async {
+    deletes.add(id);
+    final e = changeError;
+    if (e != null) throw e;
+    return changed;
   }
 
   @override
@@ -152,7 +174,50 @@ void main() {
     });
   });
 
+  group('editableText', () {
+    test('puts mentions back in the form the server reads', () {
+      expect(
+          editableText('hi {mention-user1} and {mention-guest1}', {
+            'mention-user1': {
+              'type': 'user',
+              'name': 'Ann Lee',
+              'id': 'ann',
+              'mention-id': 'ann lee',
+            },
+            'mention-guest1': {'type': 'guest', 'name': 'G', 'id': 'guest/x'},
+          }),
+          'hi @"ann lee" and @"guest/x"');
+    });
+
+    test('leaves text with braces alone', () {
+      expect(editableText('use {foo} here', {}), 'use {foo} here');
+    });
+  });
+
   group('ChatMessage.fromJson', () {
+    test('a file message cannot be edited but can be deleted', () {
+      final m = ChatMessage.fromJson({
+        'id': 1,
+        'message': '{file}',
+        'messageParameters': {
+          'file': {'type': 'file', 'name': 'a.pdf'},
+        },
+      });
+      expect(m.canEdit, isFalse);
+      expect(m.canDelete, isTrue);
+    });
+
+    test('system and deleted messages cannot be changed', () {
+      final sys = ChatMessage.fromJson(
+          {'id': 1, 'message': 'x', 'systemMessage': 'call_ended'});
+      final gone = ChatMessage.fromJson(
+          {'id': 2, 'message': 'x', 'messageType': 'comment_deleted'});
+      for (final m in [sys, gone]) {
+        expect(m.canEdit, isFalse);
+        expect(m.canDelete, isFalse);
+      }
+    });
+
     test('handles the server sending empty lists where objects go', () {
       final m = ChatMessage.fromJson({
         'id': 5,
@@ -415,6 +480,47 @@ void main() {
       expect(t.outgoing.single.error, contains('storage'));
     });
 
+    test('an edit replaces the message from the response', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..changed = msg(1, text: 'new');
+      t.start();
+      await settle();
+      expect(await t.editMessage(1, ' new '), isNull);
+      expect(src.edits, ['1:new']);
+      expect(t.messages.single.text, 'new');
+    });
+
+    test('a refused edit explains why and changes nothing', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..changeError = ApiException(400, 'p');
+      t.start();
+      await settle();
+      expect(await t.editMessage(1, 'new'), contains('24 hours'));
+      expect(t.messages.single.text, 'hi');
+    });
+
+    test('an empty edit never reaches the server', () async {
+      src.history = (_) => [msg(1)];
+      t.start();
+      await settle();
+      expect(await t.editMessage(1, '  '), isNotNull);
+      expect(src.edits, isEmpty);
+    });
+
+    test('a delete replaces the message and reports refusals', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..changed = msg(1, text: 'Message deleted by you');
+      t.start();
+      await settle();
+      expect(await t.deleteMessage(1), isNull);
+      expect(t.messages.single.text, 'Message deleted by you');
+      src.changeError = ApiException(403, 'p');
+      expect(await t.deleteMessage(1), contains('can\'t delete'));
+    });
+
     test('blank messages are not sent', () async {
       await t.send('  \n ');
       expect(src.sent, isEmpty);
@@ -569,6 +675,183 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    ChatMessage json(int id, String actor, String text) =>
+        ChatMessage.fromJson({
+          'id': id,
+          'actorType': 'users',
+          'actorId': actor,
+          'actorDisplayName': actor,
+          'message': text,
+          'isReplyable': true,
+        });
+
+    Future<void> openMenu(WidgetTester tester, String text) async {
+      await tester.tap(find.text(text), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+    }
+
+    void wide(WidgetTester tester) {
+      tester.view.physicalSize = const Size(1000, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    testWidgets('right-click on your own message offers edit and delete',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'me', 'mine')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await openMenu(tester, 'mine');
+      for (final item in ['Reply', 'Copy text', 'Edit', 'Delete…']) {
+        expect(find.text(item), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('right-click on someone else\'s offers neither',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'bob', 'theirs')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await openMenu(tester, 'theirs');
+      expect(find.text('Reply'), findsOneWidget);
+      expect(find.text('Edit'), findsNothing);
+      expect(find.text('Delete…'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a moderator can delete others\' messages but not edit them',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'bob', 'theirs')];
+      final r = Room('t', 'Family', false, 2,
+          selfId: 'me', lastRead: 1, isModerator: true);
+      await tester.pumpWidget(pane(src, r));
+      await tester.pump();
+      await openMenu(tester, 'theirs');
+      expect(find.text('Delete…'), findsOneWidget);
+      expect(find.text('Edit'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('deleting asks first, and Cancel does nothing', (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'me', 'mine')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await openMenu(tester, 'mine');
+      await tester.tap(find.text('Delete…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(src.deletes, isEmpty);
+      await openMenu(tester, 'mine');
+      await tester.tap(find.text('Delete…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.pumpAndSettle();
+      expect(src.deletes, [1]);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('editing saves with Enter and restores the draft',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'me', 'mine')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'half typed');
+      await openMenu(tester, 'mine');
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Editing your message'), findsOneWidget);
+      TextField field() => tester.widget<TextField>(find.byType(TextField));
+      expect(field().controller!.text, 'mine');
+      await tester.enterText(find.byType(TextField), 'changed');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(src.edits, ['1:changed']);
+      expect(src.sent, isEmpty);
+      expect(find.text('Editing your message'), findsNothing);
+      expect(field().controller!.text, 'half typed');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Escape cancels an edit without saving', (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'me', 'mine')];
+      final drafts = <String, String>{};
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ConversationPane(
+            source: src,
+            room: room(),
+            drafts: drafts,
+            onBack: () {},
+            onCall: () {},
+          ),
+        ),
+      ));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'draft');
+      await openMenu(tester, 'mine');
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      expect(drafts['t'], 'draft');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(src.edits, isEmpty);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'draft');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('right-click on a conversation offers removal', (tester) async {
+      wide(tester);
+      Room? removed;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ChatLayout(
+            rooms: [room()],
+            roomsError: null,
+            selected: null,
+            onSelect: (_) {},
+            onRefresh: () {},
+            onRemove: (r) => removed = r,
+            conversation: null,
+          ),
+        ),
+      ));
+      await openMenu(tester, 'Family');
+      await tester.tap(find.text('Remove chat…'));
+      await tester.pumpAndSettle();
+      expect(removed?.token, 't');
+    });
+
+    testWidgets('the last moderator cannot pick removal', (tester) async {
+      wide(tester);
+      Room? removed;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ChatLayout(
+            rooms: [Room('t', 'Family', false, 2, canLeave: false)],
+            roomsError: null,
+            selected: null,
+            onSelect: (_) {},
+            onRefresh: () {},
+            onRemove: (r) => removed = r,
+            conversation: null,
+          ),
+        ),
+      ));
+      await openMenu(tester, 'Family');
+      await tester.tap(find.textContaining('only moderator'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(removed, isNull);
+    });
+
     testWidgets('no composer when chat is not allowed', (tester) async {
       final src = FakeSource()..history = (_) => [msg(1)];
       await tester.pumpWidget(pane(src, room(canChat: false)));
@@ -596,6 +879,7 @@ void main() {
                 selected: null,
                 onSelect: (_) {},
                 onRefresh: () {},
+                onRemove: (_) {},
                 conversation:
                     withConversation ? const Text('conversation') : null,
               ),
