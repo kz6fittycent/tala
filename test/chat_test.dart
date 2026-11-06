@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/list_prefs.dart';
 import 'package:tala/src/nc_api.dart';
 
 ChatMessage msg(int id,
@@ -120,6 +122,11 @@ class FakeSource implements ChatSource {
 }
 
 Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+/// Never the user's real settings file.
+ListPrefs tempPrefs() => ListPrefs(
+  file: File('${Directory.systemTemp.createTempSync('tala').path}/s.json'),
+);
 
 void main() {
   group('parseMessage', () {
@@ -820,6 +827,7 @@ void main() {
             onSelect: (_) {},
             onRefresh: () {},
             onRemove: (r) => removed = r,
+            listPrefs: tempPrefs(),
             conversation: null,
           ),
         ),
@@ -842,6 +850,7 @@ void main() {
             onSelect: (_) {},
             onRefresh: () {},
             onRemove: (r) => removed = r,
+            listPrefs: tempPrefs(),
             conversation: null,
           ),
         ),
@@ -880,6 +889,7 @@ void main() {
                 onSelect: (_) {},
                 onRefresh: () {},
                 onRemove: (_) {},
+                listPrefs: tempPrefs(),
                 conversation:
                     withConversation ? const Text('conversation') : null,
               ),
@@ -904,6 +914,110 @@ void main() {
       await tester.pumpWidget(layout(500, withConversation: true));
       expect(find.text('Conversations'), findsNothing);
       expect(find.text('conversation'), findsOneWidget);
+    });
+
+    group('archived conversations', () {
+      Widget list(ListPrefs prefs, {String? selected}) => MaterialApp(
+        home: Scaffold(
+          body: RoomList(
+            rooms: [
+              Room('a', 'Family', false, 2),
+              Room('b', 'Old project', false, 2, archived: true, unread: 3),
+              Room('c', 'Talk updates', false, 4, archived: true),
+            ],
+            error: null,
+            selected: selected,
+            onSelect: (_) {},
+            onRefresh: () {},
+            onRemove: (_) {},
+            prefs: prefs,
+          ),
+        ),
+      );
+
+      testWidgets('sit collapsed under their own section, with unread shown',
+          (tester) async {
+        await tester.pumpWidget(list(tempPrefs()));
+        expect(find.text('Family'), findsOneWidget);
+        expect(find.text('Archived (2)'), findsOneWidget);
+        expect(find.text('3'), findsOneWidget);
+        expect(find.text('Old project'), findsNothing);
+      });
+
+      testWidgets('open when the section is tapped', (tester) async {
+        await tester.pumpWidget(list(tempPrefs()));
+        await tester.tap(find.text('Archived (2)'));
+        await tester.pump();
+        expect(find.text('Old project'), findsOneWidget);
+        expect(find.text('Talk updates'), findsOneWidget);
+        await tester.tap(find.text('Archived (2)'));
+        await tester.pump();
+        expect(find.text('Old project'), findsNothing);
+      });
+
+      testWidgets('the section can be hidden and brought back from the menu',
+          (tester) async {
+        final prefs = tempPrefs()..archivedOpen = true;
+        await tester.pumpWidget(list(prefs));
+        await tester.tap(find.byTooltip('List options'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(CheckedPopupMenuItem<String>));
+        await tester.pumpAndSettle();
+        expect(prefs.hideArchived, isTrue);
+        expect(find.text('Archived (2)'), findsNothing);
+        expect(find.text('Old project'), findsNothing);
+        expect(find.text('Family'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('List options'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(CheckedPopupMenuItem<String>));
+        await tester.pumpAndSettle();
+        expect(prefs.hideArchived, isFalse);
+        expect(find.text('Archived (2)'), findsOneWidget);
+      });
+
+      testWidgets('no section appears when nothing is archived',
+          (tester) async {
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: RoomList(
+              rooms: [Room('a', 'Family', false, 2)],
+              error: null,
+              selected: null,
+              onSelect: (_) {},
+              onRefresh: () {},
+              onRemove: (_) {},
+              prefs: tempPrefs(),
+            ),
+          ),
+        ));
+        expect(find.textContaining('Archived'), findsNothing);
+      });
+
+      test('the server flag is read, and missing means not archived', () {
+        Map<String, dynamic> json(Map<String, dynamic> extra) => {
+          'token': 't',
+          'type': 2,
+          ...extra,
+        };
+        expect(Room.fromJson(json({'isArchived': true})).archived, isTrue);
+        expect(Room.fromJson(json({'isArchived': false})).archived, isFalse);
+        expect(Room.fromJson(json({})).archived, isFalse);
+      });
+
+      test('the choices survive a restart, and a bad file is ignored', () {
+        final file = File(
+          '${Directory.systemTemp.createTempSync('tala').path}/s.json',
+        );
+        ListPrefs(file: file)
+          ..hideArchived = true
+          ..archivedOpen = true;
+        final again = ListPrefs(file: file);
+        expect(again.hideArchived, isTrue);
+        expect(again.archivedOpen, isTrue);
+        file.writeAsStringSync('not json');
+        expect(ListPrefs(file: file).hideArchived, isFalse);
+      });
     });
   });
 }

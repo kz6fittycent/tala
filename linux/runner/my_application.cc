@@ -6,6 +6,7 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "keyring.h"
 #include "tray.h"
 
 struct _MyApplication {
@@ -13,6 +14,7 @@ struct _MyApplication {
   char** dart_entrypoint_arguments;
   GtkWindow* window;
   Tray* tray;
+  Keyring* keyring;
   // Started at login: stay in the tray rather than opening a window.
   gboolean start_hidden;
 };
@@ -118,6 +120,7 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   self->tray = tray_new(GTK_APPLICATION(application), window, view);
+  self->keyring = keyring_new(view);
   if (self->start_hidden) {
     g_timeout_add_seconds(kTrayWaitSeconds, tray_wait_cb, self);
   }
@@ -181,6 +184,7 @@ static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_pointer(&self->tray, tray_free);
+  g_clear_pointer(&self->keyring, keyring_free);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

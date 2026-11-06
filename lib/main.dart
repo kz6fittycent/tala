@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'src/account_store.dart';
 import 'src/call.dart';
 import 'src/chat.dart';
 import 'src/camera_cycle.dart';
@@ -11,6 +12,7 @@ import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
 import 'src/desktop_notify.dart';
 import 'src/incoming_calls.dart';
+import 'src/list_prefs.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
 import 'src/ringer.dart';
@@ -22,13 +24,24 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   log('Tala prototype starting');
   if (args.contains('--chat-check')) {
-    final creds = Credentials.load();
+    final Credentials? creds;
+    try {
+      creds = await AccountStore().load();
+    } on KeyringException catch (e) {
+      log('check: keyring failed: ${e.message}');
+      exit(1);
+    }
     if (creds == null) {
       log('check: not signed in');
       exit(1);
     }
     await NcApi(creds).chatCheck();
     exit(0);
+  }
+  if (args.contains('--keyring-selftest')) {
+    final passed = await keyringSelfTest();
+    log('keyring self-test ${passed ? 'passed' : 'FAILED'}');
+    exit(passed ? 0 : 1);
   }
   if (args.contains('--test-ring')) {
     final ringer = Ringer();
@@ -57,10 +70,140 @@ class TalaApp extends StatelessWidget {
         theme: ThemeData(colorSchemeSeed: Colors.indigo),
         darkTheme: ThemeData(
             colorSchemeSeed: Colors.indigo, brightness: Brightness.dark),
-        home: Credentials.load() == null
-            ? const LoginPage()
-            : RoomsPage(api: NcApi(Credentials.load()!)),
+        home: const StartPage(),
       );
+}
+
+/// Finds the saved account. The window stays hidden on a background start
+/// unless this needs the user, as they'd otherwise have no idea why nothing
+/// is happening.
+class StartPage extends StatefulWidget {
+  const StartPage({super.key});
+  @override
+  State<StartPage> createState() => _StartPageState();
+}
+
+class _StartPageState extends State<StartPage> {
+  /// The keyring service can still be starting when Tala starts at login.
+  static const _attempts = 5;
+  static const _retryDelay = Duration(seconds: 3);
+
+  /// An unlock prompt can wait for as long as it likes, and one that can't
+  /// appear never finishes. Tala can't take calls until this is settled.
+  static const _slowAfter = Duration(seconds: 20);
+
+  final AccountStore _store = AccountStore();
+  bool _loading = true;
+  NcApi? _api;
+  KeyringException? _problem;
+  bool _slow = false;
+  Timer? _slowTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _slowTimer?.cancel();
+    super.dispose();
+  }
+
+  void _retry() {
+    setState(() {
+      _loading = true;
+      _problem = null;
+    });
+    _load();
+  }
+
+  Future<void> _load() async {
+    _slowTimer?.cancel();
+    _slowTimer = Timer(_slowAfter, () {
+      log('account: still waiting for the keyring');
+      AppTray().show();
+      setState(() => _slow = true);
+    });
+    for (var attempt = 1;; attempt++) {
+      try {
+        final creds = await _store.load();
+        _slowTimer?.cancel();
+        if (!mounted) return;
+        if (creds == null) AppTray().show();
+        setState(() {
+          _loading = false;
+          _api = creds == null ? null : NcApi(creds);
+        });
+      } on KeyringException catch (e) {
+        log('account: attempt $attempt: locked=${e.locked}: ${e.message}');
+        if (!e.locked && attempt < _attempts) {
+          await Future<void>.delayed(_retryDelay);
+          if (!mounted) return;
+          continue;
+        }
+        _slowTimer?.cancel();
+        if (!mounted) return;
+        AppTray().show();
+        setState(() {
+          _loading = false;
+          _slow = false;
+          _problem = e;
+        });
+      }
+      return;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        body: Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const CircularProgressIndicator(),
+            if (_slow) ...[
+              const SizedBox(height: 16),
+              const Text('Waiting for your keyring. If it asked for a '
+                  'password, answer that first.'),
+            ],
+          ]),
+        ),
+      );
+    }
+    final problem = _problem;
+    if (problem != null) {
+      return Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                problem.locked
+                    ? 'Your keyring is locked'
+                    : 'Can\'t reach your keyring',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                problem.locked
+                    ? 'Tala keeps your sign-in there. Unlock it to continue.'
+                    : 'Tala keeps your sign-in there, but no keyring service '
+                        'answered. Your account is still saved if you\'ve '
+                        'signed in before.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: _retry, child: const Text('Try again')),
+            ]),
+          ),
+        ),
+      );
+    }
+    final api = _api;
+    return api == null ? const LoginPage() : RoomsPage(api: api);
+  }
 }
 
 class LoginPage extends StatefulWidget {
@@ -80,6 +223,17 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _status = 'Approve the login in your browser…');
     try {
       final creds = await loginFlow(url);
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        await AccountStore().save(creds);
+      } on KeyringException catch (e) {
+        log('login: saving to the keyring failed: ${e.message}');
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Signed in, but your keyring couldn\'t save it. '
+              'You\'ll need to sign in again next time.'),
+        ));
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => RoomsPage(api: NcApi(creds))));
@@ -130,6 +284,7 @@ class _RoomsPageState extends State<RoomsPage> {
   String? _selected;
   Timer? _roomTimer;
   final Map<String, String> _drafts = {};
+  final ListPrefs _listPrefs = ListPrefs();
   final DesktopNotifier _notifier = DesktopNotifier();
   late final AppLifecycleListener _lifecycle;
   late final ChatAlerts _alerts = ChatAlerts(
@@ -242,6 +397,7 @@ class _RoomsPageState extends State<RoomsPage> {
       ..onConversationRead = null;
     _notifier.closeAll();
     _roomTimer?.cancel();
+    _listPrefs.dispose();
     _incoming.removeListener(_onIncomingChanged);
     _incoming.dispose();
     _ringer.stop();
@@ -316,6 +472,7 @@ class _RoomsPageState extends State<RoomsPage> {
           onSelect: _select,
           onRefresh: _refreshRooms,
           onRemove: _removeRoom,
+          listPrefs: _listPrefs,
           conversation: selected == null
               ? null
               : ConversationPane(

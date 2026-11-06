@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'chat.dart';
+import 'list_prefs.dart';
 import 'log.dart';
 import 'nc_api.dart';
 
@@ -39,6 +40,7 @@ class ChatLayout extends StatelessWidget {
     required this.onSelect,
     required this.onRefresh,
     required this.onRemove,
+    required this.listPrefs,
     required this.conversation,
   });
 
@@ -48,6 +50,7 @@ class ChatLayout extends StatelessWidget {
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
   final ValueChanged<Room> onRemove;
+  final ListPrefs listPrefs;
   final Widget? conversation;
 
   @override
@@ -60,6 +63,7 @@ class ChatLayout extends StatelessWidget {
         onSelect: onSelect,
         onRefresh: onRefresh,
         onRemove: onRemove,
+        prefs: listPrefs,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -88,6 +92,7 @@ class RoomList extends StatelessWidget {
     required this.onSelect,
     required this.onRefresh,
     required this.onRemove,
+    required this.prefs,
   });
 
   final List<Room>? rooms;
@@ -96,10 +101,27 @@ class RoomList extends StatelessWidget {
   final ValueChanged<String?> onSelect;
   final VoidCallback onRefresh;
   final ValueChanged<Room> onRemove;
+  final ListPrefs prefs;
+
+  Widget _tile(Room room) => _RoomTile(
+    room: room,
+    selected: room.token == selected,
+    onTap: () => onSelect(room.token),
+    onRemove: () => onRemove(room),
+  );
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: prefs,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
     final items = rooms;
+    final active = [...?items?.where((r) => !r.archived)];
+    final archived = [...?items?.where((r) => r.archived)];
+    final showArchived = archived.isNotEmpty && !prefs.hideArchived;
+    final archivedOpen = showArchived && prefs.archivedOpen;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -118,6 +140,18 @@ class RoomList extends StatelessWidget {
                 icon: const Icon(Icons.refresh),
                 onPressed: onRefresh,
               ),
+              PopupMenuButton<String>(
+                tooltip: 'List options',
+                icon: const Icon(Icons.more_vert),
+                onSelected: (_) => prefs.hideArchived = !prefs.hideArchived,
+                itemBuilder: (context) => [
+                  CheckedPopupMenuItem(
+                    value: 'archived',
+                    checked: !prefs.hideArchived,
+                    child: const Text('Show archived'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -131,16 +165,61 @@ class RoomList extends StatelessWidget {
                       : const CircularProgressIndicator(),
                 )
               : ListView.builder(
-                  itemCount: items.length,
-                  itemBuilder: (context, i) => _RoomTile(
-                    room: items[i],
-                    selected: items[i].token == selected,
-                    onTap: () => onSelect(items[i].token),
-                    onRemove: () => onRemove(items[i]),
-                  ),
+                  itemCount:
+                      active.length +
+                      (showArchived ? 1 : 0) +
+                      (archivedOpen ? archived.length : 0),
+                  itemBuilder: (context, i) {
+                    if (i < active.length) return _tile(active[i]);
+                    if (i == active.length) {
+                      return _ArchivedHeader(
+                        rooms: archived,
+                        open: archivedOpen,
+                        onTap: () => prefs.archivedOpen = !prefs.archivedOpen,
+                      );
+                    }
+                    return _tile(archived[i - active.length - 1]);
+                  },
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _ArchivedHeader extends StatelessWidget {
+  const _ArchivedHeader({
+    required this.rooms,
+    required this.open,
+    required this.onTap,
+  });
+  final List<Room> rooms;
+  final bool open;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final unread = rooms.fold(0, (sum, r) => sum + r.unread);
+    final mention = rooms.any((r) => r.unreadMention);
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.archive_outlined),
+      title: Text('Archived (${rooms.length})'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (unread > 0)
+            Badge(
+              label: Text('$unread'),
+              backgroundColor: mention ? scheme.error : scheme.primary,
+              textColor: mention ? scheme.onError : scheme.onPrimary,
+            ),
+          const SizedBox(width: 6),
+          Icon(open ? Icons.expand_less : Icons.expand_more),
+        ],
+      ),
+      onTap: onTap,
     );
   }
 }

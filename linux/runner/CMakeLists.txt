@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
   "tray.cc"
+  "keyring.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -26,5 +27,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 pkg_check_modules(APPINDICATOR REQUIRED IMPORTED_TARGET ayatana-appindicator3-0.1)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::APPINDICATOR)
+
+pkg_check_modules(SECRET REQUIRED IMPORTED_TARGET libsecret-1)
+target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::SECRET)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

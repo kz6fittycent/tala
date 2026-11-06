@@ -13,24 +13,6 @@ class Credentials {
   final String server;
   final String user;
   final String appPassword;
-
-  static File get _file => File(
-      '${Platform.environment['HOME']}/.config/tala-prototype/credentials.json');
-
-  static Credentials? load() {
-    if (!_file.existsSync()) return null;
-    final d = jsonDecode(_file.readAsStringSync()) as Map<String, dynamic>;
-    return Credentials(d['server'], d['user'], d['appPassword']);
-  }
-
-  /// Prototype only: a mode 600 file. The real app must use the keyring.
-  Future<void> save() async {
-    await _file.parent.create(recursive: true);
-    await _file.writeAsString('{}');
-    await Process.run('chmod', ['600', _file.path]);
-    await _file.writeAsString(jsonEncode(
-        {'server': server, 'user': user, 'appPassword': appPassword}));
-  }
 }
 
 class Room {
@@ -50,6 +32,7 @@ class Room {
     this.lastMessage,
     this.canLeave = true,
     this.isModerator = false,
+    this.archived = false,
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -83,6 +66,7 @@ class Room {
       // Both people own a one-to-one, but neither can delete the other's words.
       isModerator:
           type != 1 && const {1, 2, 6}.contains(r['participantType']),
+      archived: r['isArchived'] == true,
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -104,6 +88,7 @@ class Room {
   final ChatMessage? lastMessage;
   final bool canLeave;
   final bool isModerator;
+  final bool archived;
 }
 
 class SignalingSettings {
@@ -509,6 +494,7 @@ class NcApi implements CallSource, ChatSource {
   Future<void> chatCheck() async {
     final rooms = await this.rooms();
     log('check: ${rooms.length} conversations, '
+        '${rooms.where((r) => r.archived).length} archived, '
         '${rooms.where((r) => r.lastMessage != null).length} with a last message, '
         'types ${rooms.map((r) => r.type).toSet()}, '
         'chat allowed ${rooms.where((r) => r.canChat).length}, '
@@ -563,6 +549,7 @@ class NcApi implements CallSource, ChatSource {
 
 /// Nextcloud Login Flow v2: the user approves in their browser and the server
 /// issues an app password for this device. Passwords never pass through Tala.
+/// The caller stores the result.
 Future<Credentials> loginFlow(String server) async {
   final base = server.replaceAll(RegExp(r'/+$'), '');
   final http = HttpClient()..userAgent = 'Tala desktop prototype';
@@ -589,10 +576,8 @@ Future<Credentials> loginFlow(String server) async {
       final t = await r.transform(utf8.decoder).join();
       if (r.statusCode == 200) {
         final c = jsonDecode(t) as Map<String, dynamic>;
-        final creds = Credentials(c['server'], c['loginName'], c['appPassword']);
-        await creds.save();
         log('login: approved');
-        return creds;
+        return Credentials(c['server'], c['loginName'], c['appPassword']);
       }
     }
     throw TimeoutException('Login was not approved in time');
