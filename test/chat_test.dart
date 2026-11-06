@@ -1117,7 +1117,7 @@ void main() {
             if (b == Brightness.dark) {
               expect(l, greaterThan(.12), reason: 'too black: $name');
             } else {
-              expect(l, lessThan(.96), reason: 'too glaring: $name');
+              expect(l, lessThan(.91), reason: 'too glaring: $name');
             }
             for (final bg in [
               s.surface,

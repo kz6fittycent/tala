@@ -57,14 +57,14 @@ const _darkLevels = (
   bright: .28,
 );
 const _lightLevels = (
-  dim: .84,
-  surface: .93,
-  lowest: .96,
-  low: .94,
-  container: .91,
-  high: .89,
-  highest: .86,
-  bright: .96,
+  dim: .80,
+  surface: .89,
+  lowest: .92,
+  low: .90,
+  container: .87,
+  high: .85,
+  highest: .82,
+  bright: .92,
 );
 
 ColorScheme _softened(ColorScheme s, Accent accent) {
@@ -79,14 +79,14 @@ ColorScheme _softened(ColorScheme s, Accent accent) {
     1,
     hue,
     dark ? .40 : .55,
-    dark ? .27 : .82,
+    dark ? .27 : .78,
   ).toColor();
   // Selected rows have to stand out from the softer list behind them.
   final selection = HSLColor.fromAHSL(
     1,
     hue,
     dark ? .22 : .35,
-    dark ? .25 : .83,
+    dark ? .25 : .79,
   ).toColor();
   return s.copyWith(
     primaryContainer: bubble,
