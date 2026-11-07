@@ -78,6 +78,10 @@ class Server {
         {'id': 'user id', 'label': 'Me', 'source': 'users'},
         {'id': 'staff', 'label': 'Staff', 'source': 'groups'},
       ]);
+    } else if (path.endsWith('/room/abc/participants') ||
+        path.endsWith('/room/abc/public')) {
+      bodies.add(utf8.decode(body));
+      _ocs(r, {});
     } else if (path.endsWith('/spreed/api/v4/room') && q.method == 'POST') {
       bodies.add(utf8.decode(body));
       _ocs(r, {'token': 'new-room'});
@@ -227,6 +231,25 @@ void main() {
   test('starting a conversation asks for a one-to-one', () async {
     expect(await api.startOneToOne('sam'), 'new-room');
     expect(jsonDecode(s.bodies.single), {'roomType': 1, 'invite': 'sam'});
+  });
+
+  test('a guest conversation is public, and sends a password only if set',
+      () async {
+    expect(await api.createGuestConversation('Picnic', ''), 'new-room');
+    expect(jsonDecode(s.bodies.last), {'roomType': 3, 'roomName': 'Picnic'});
+    await api.createGuestConversation('Picnic', 'hunter22');
+    expect(jsonDecode(s.bodies.last),
+        {'roomType': 3, 'roomName': 'Picnic', 'password': 'hunter22'});
+  });
+
+  test('email invitations and turning a link off use the right calls',
+      () async {
+    await api.inviteByEmail('abc', 'pat@example.com');
+    expect(s.requests.last, 'POST /ocs/v2.php/apps/spreed/api/v4/room/abc/participants');
+    expect(jsonDecode(s.bodies.last),
+        {'newParticipant': 'pat@example.com', 'source': 'emails'});
+    await api.turnOffGuestLink('abc');
+    expect(s.requests.last, 'DELETE /ocs/v2.php/apps/spreed/api/v4/room/abc/public');
   });
 
   test('only a 401 counts as a rejected sign-in', () async {

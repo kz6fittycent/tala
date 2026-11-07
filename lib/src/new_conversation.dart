@@ -7,8 +7,15 @@ import 'nc_api.dart';
 
 /// Finds someone on the server. Closes with the person chosen, or null.
 class NewConversationDialog extends StatefulWidget {
-  const NewConversationDialog({super.key, required this.search});
+  const NewConversationDialog({
+    super.key,
+    required this.search,
+    this.onInviteGuest,
+  });
   final Future<List<Person>> Function(String query) search;
+
+  /// Called after closing, to invite someone who has no account.
+  final VoidCallback? onInviteGuest;
 
   @override
   State<NewConversationDialog> createState() => _NewConversationDialogState();
@@ -125,6 +132,17 @@ class _NewConversationDialogState extends State<NewConversationDialog> {
             onChanged: _changed,
           ),
           _results(),
+          if (widget.onInviteGuest != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.link),
+              title: const Text('Invite someone without an account'),
+              subtitle: const Text('Create a conversation with a link'),
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onInviteGuest!();
+              },
+            ),
         ],
       ),
     ),

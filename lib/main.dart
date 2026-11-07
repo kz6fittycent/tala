@@ -20,6 +20,7 @@ import 'src/desktop_notify.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
+import 'src/guest_link.dart';
 import 'src/new_conversation.dart';
 import 'src/ringer.dart';
 import 'src/settings.dart';
@@ -612,7 +613,10 @@ class _RoomsPageState extends State<RoomsPage> {
     final messenger = ScaffoldMessenger.of(context);
     final person = await showDialog<Person>(
       context: context,
-      builder: (_) => NewConversationDialog(search: widget.api.searchPeople),
+      builder: (_) => NewConversationDialog(
+        search: widget.api.searchPeople,
+        onInviteGuest: _newGuestConversation,
+      ),
     );
     if (person == null) return;
     try {
@@ -625,6 +629,68 @@ class _RoomsPageState extends State<RoomsPage> {
         content: Text('Couldn\'t start a conversation with ${person.name}.'),
       ));
     }
+  }
+
+  Future<void> _newGuestConversation() async {
+    final token = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          NewGuestConversationDialog(create: widget.api.createGuestConversation),
+    );
+    if (token == null || !mounted) return;
+    await _refreshRooms();
+    if (!mounted) return;
+    _select(token);
+    final room = _rooms?.where((r) => r.token == token).firstOrNull;
+    if (room != null) await _showGuestLink(room);
+  }
+
+  Future<void> _showGuestLink(Room room) => showDialog<void>(
+    context: context,
+    builder: (_) => GuestLinkDialog(
+      name: room.name,
+      link: guestLink(widget.api.creds.server, room.token),
+      hasPassword: room.hasPassword,
+      canManage: room.isModerator,
+      invite: (email) => widget.api.inviteByEmail(room.token, email),
+      turnOff: () => _turnOffGuestLink(room),
+    ),
+  );
+
+  Future<bool> _turnOffGuestLink(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Turn off the guest link?'),
+        content: Text(
+          'The link to ${room.name} stops working and guests lose access. '
+          'People with accounts stay in the conversation.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Turn off'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+    try {
+      await widget.api.turnOffGuestLink(room.token);
+    } catch (e) {
+      log('rooms: turning off a guest link failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Couldn\'t turn off that link.')),
+      );
+      return false;
+    }
+    await _refreshRooms();
+    return true;
   }
 
   Future<void> _setArchived(Room room, bool archived) async {
@@ -778,6 +844,7 @@ class _RoomsPageState extends State<RoomsPage> {
             onChangeAccount: widget.onChangeAccount,
           ),
           onNewConversation: _newConversation,
+          onGuestLink: _showGuestLink,
           banner: _invites.isEmpty
               ? null
               : InviteBanners(

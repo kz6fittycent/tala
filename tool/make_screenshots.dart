@@ -19,6 +19,7 @@ import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
 import 'package:tala/src/report.dart';
@@ -151,7 +152,7 @@ final _rooms = [
   _room(
     'book',
     'Book club',
-    2,
+    3,
     'Next month\'s pick is up to you',
     95,
     from: 'Marco Silva',
@@ -339,12 +340,32 @@ void main() {
               Person('maya', 'Maya Chen', ''),
               Person('marco', 'Marco Silva', ''),
             ],
+            onInviteGuest: () {},
           ),
         );
         await _settle(t);
         await t.enterText(find.byType(TextField).last, 'ma');
         await t.pump(const Duration(milliseconds: 400));
       },
+    );
+  });
+
+  testWidgets('guest link', (t) {
+    return scene(
+      t,
+      'guest-link',
+      _main(),
+      then: () => dialog(
+        t,
+        GuestLinkDialog(
+          name: 'Book club',
+          link: 'https://cloud.example.com/index.php/call/x7k2mq9p',
+          hasPassword: false,
+          canManage: true,
+          invite: (_) async {},
+          turnOff: () async => false,
+        ),
+      ),
     );
   });
 

@@ -43,6 +43,7 @@ class Room {
     this.canArchive = false,
     this.muted = false,
     this.remoteServer = '',
+    this.hasPassword = false,
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -81,6 +82,7 @@ class Room {
       canArchive: r.containsKey('isArchived'),
       muted: r['notificationLevel'] == 3,
       remoteServer: r['remoteServer'] as String? ?? '',
+      hasPassword: r['hasPassword'] == true,
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -108,6 +110,13 @@ class Room {
 
   /// Where a federated conversation really lives, or empty for a local one.
   final String remoteServer;
+
+  /// Guests need a password as well as the link.
+  final bool hasPassword;
+
+  /// A link lets people join without an account. Federated conversations
+  /// aren't this server's to share.
+  bool get hasGuestLink => type == 3 && remoteServer.isEmpty;
   bool get isFederated => remoteServer.isNotEmpty;
 }
 
@@ -338,6 +347,31 @@ class NcApi implements CallSource, ChatSource {
     );
     return (d as Map)['token'] as String;
   }
+
+  /// Creates a conversation people can join by link, without an account.
+  Future<String> createGuestConversation(String name, String password) async {
+    final d = await _ocs(
+      'POST',
+      '$_talkV4/room',
+      body: {
+        'roomType': 3,
+        'roomName': name,
+        if (password.isNotEmpty) 'password': password,
+      },
+    );
+    return (d as Map)['token'] as String;
+  }
+
+  /// The server emails the invitation, with the conversation's link.
+  Future<void> inviteByEmail(String token, String email) => _ocs(
+    'POST',
+    '$_talkV4/room/$token/participants',
+    body: {'newParticipant': email, 'source': 'emails'},
+  );
+
+  /// The link stops working and guests lose access. Members stay.
+  Future<void> turnOffGuestLink(String token) =>
+      _ocs('DELETE', '$_talkV4/room/$token/public');
 
   /// Whether the server has stopped accepting this app password, as opposed to
   /// one request being refused or the network being down.

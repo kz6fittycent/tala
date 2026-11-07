@@ -47,6 +47,7 @@ class ChatLayout extends StatelessWidget {
     this.menu,
     this.banner,
     this.onNewConversation,
+    this.onGuestLink,
   });
 
   final List<Room>? rooms;
@@ -61,6 +62,7 @@ class ChatLayout extends StatelessWidget {
   final Widget? menu;
   final Widget? banner;
   final VoidCallback? onNewConversation;
+  final ValueChanged<Room>? onGuestLink;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -77,6 +79,7 @@ class ChatLayout extends StatelessWidget {
         menu: menu,
         banner: banner,
         onNewConversation: onNewConversation,
+        onGuestLink: onGuestLink,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -110,6 +113,7 @@ class RoomList extends StatelessWidget {
     this.menu,
     this.banner,
     this.onNewConversation,
+    this.onGuestLink,
   });
 
   final List<Room>? rooms;
@@ -123,6 +127,7 @@ class RoomList extends StatelessWidget {
   final Widget? menu;
   final Widget? banner;
   final VoidCallback? onNewConversation;
+  final ValueChanged<Room>? onGuestLink;
 
   Widget _tile(Room room) => _RoomTile(
     room: room,
@@ -130,6 +135,7 @@ class RoomList extends StatelessWidget {
     onTap: () => onSelect(room.token),
     onRemove: () => onRemove(room),
     onArchive: () => onArchive(room),
+    onGuestLink: onGuestLink == null ? null : () => onGuestLink!(room),
   );
 
   @override
@@ -253,15 +259,19 @@ class _RoomTile extends StatelessWidget {
     required this.onTap,
     required this.onRemove,
     required this.onArchive,
+    this.onGuestLink,
   });
   final Room room;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onRemove;
   final VoidCallback onArchive;
+  final VoidCallback? onGuestLink;
 
   Future<void> _menu(BuildContext context, Offset at) async {
     final choice = await _showMenuAt<String>(context, at, [
+      if (room.hasGuestLink && onGuestLink != null)
+        const PopupMenuItem(value: 'link', child: Text('Guest link…')),
       if (room.canArchive)
         PopupMenuItem(
           value: 'archive',
@@ -279,6 +289,7 @@ class _RoomTile extends StatelessWidget {
     ]);
     if (choice == 'remove') onRemove();
     if (choice == 'archive') onArchive();
+    if (choice == 'link') onGuestLink?.call();
   }
 
   String get _preview {
@@ -316,6 +327,14 @@ class _RoomTile extends StatelessWidget {
                 child: Tooltip(
                   message: 'Hosted on ${_hostOf(room.remoteServer)}',
                   child: Icon(Icons.public, size: 16, color: scheme.outline),
+                ),
+              ),
+            if (room.hasGuestLink)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Tooltip(
+                  message: 'Guests can join with a link',
+                  child: Icon(Icons.link, size: 16, color: scheme.outline),
                 ),
               ),
             if (room.hasCall)
