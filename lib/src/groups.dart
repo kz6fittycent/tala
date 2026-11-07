@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'avatars.dart';
 import 'chat.dart' show ApiException;
 import 'log.dart';
 import 'nc_api.dart';
@@ -173,7 +174,9 @@ class MembersDialog extends StatefulWidget {
     required this.add,
     required this.remove,
     required this.setModerator,
+    this.avatars,
   });
+  final AvatarStore? avatars;
   final String name;
   final String selfId;
   final bool canManage;
@@ -326,6 +329,12 @@ class _MembersDialogState extends State<MembersDialog> {
         final details = [if (_isSelf(m)) 'You', if (m.role.isNotEmpty) m.role];
         return ListTile(
           contentPadding: EdgeInsets.zero,
+          leading: Avatar(
+            name: m.displayName,
+            image: m.actorType == 'users'
+                ? widget.avatars?.forUser(m.actorId)
+                : null,
+          ),
           title: Text(
             m.displayName,
             maxLines: 1,

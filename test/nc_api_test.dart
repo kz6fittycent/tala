@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tala/src/chat.dart' show ApiException;
 import 'package:tala/src/nc_api.dart';
 
 /// A loopback server, so these exercise the real HTTP requests.
@@ -115,6 +116,22 @@ class Server {
       _ocs(r, {});
     } else if (path.contains('/reaction/')) {
       _ocs(r, {});
+    } else if (path.startsWith('/index.php/avatar/custom')) {
+      r.headers.set('X-NC-IsCustomAvatar', '1');
+      r.headers.contentType = ContentType('image', 'png');
+      r.add([1, 2, 3]);
+    } else if (path.startsWith('/index.php/avatar/generated')) {
+      r.headers.set('X-NC-IsCustomAvatar', '0');
+      r.headers.contentType = ContentType('image', 'png');
+      r.add([4, 5]);
+    } else if (path.endsWith('/room/pic/avatar')) {
+      r.headers.contentType = ContentType('image', 'jpeg');
+      r.add([6]);
+    } else if (path.endsWith('/room/svg/avatar')) {
+      r.headers.contentType = ContentType('image', 'svg+xml');
+      r.write('<svg/>');
+    } else if (path.endsWith('/room/broken/avatar')) {
+      r.statusCode = 500;
     } else if (path.contains('/core/preview')) {
       r.add([1, 2, 3]);
     } else {
@@ -305,6 +322,24 @@ void main() {
     await api.renameConversation('abc', 'New name');
     expect(s.requests.last, 'PUT $room');
     expect(jsonDecode(s.bodies.last), {'roomName': 'New name'});
+  });
+
+  test('only a picture someone chose counts as a user avatar', () async {
+    expect(await api.userAvatar('custom'), [1, 2, 3]);
+    expect(await api.userAvatar('generated'), isNull);
+    expect(await api.userAvatar('nobody'), isNull, reason: 'a 404');
+    expect(s.requests.first, 'GET /index.php/avatar/custom/128');
+  });
+
+  test('a user id is safe in the avatar address', () async {
+    await api.userAvatar('a b/c');
+    expect(s.requests.last, 'GET /index.php/avatar/a%20b%2Fc/128');
+  });
+
+  test('a conversation avatar must be something Tala can draw', () async {
+    expect(await api.roomAvatar('pic'), [6]);
+    expect(await api.roomAvatar('svg'), isNull);
+    await expectLater(api.roomAvatar('broken'), throwsA(isA<ApiException>()));
   });
 
   test('only a 401 counts as a rejected sign-in', () async {

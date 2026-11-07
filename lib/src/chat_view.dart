@@ -6,7 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_colors.dart';
+import 'avatars.dart';
 import 'chat.dart';
 import 'log.dart';
 import 'mentions.dart';
@@ -53,8 +53,10 @@ class ChatLayout extends StatelessWidget {
     this.onDelete,
     this.onMembers,
     this.onRename,
+    this.avatars,
   });
 
+  final AvatarStore? avatars;
   final List<Room>? rooms;
   final Object? roomsError;
   final Room? selected;
@@ -91,6 +93,7 @@ class ChatLayout extends StatelessWidget {
         onDelete: onDelete,
         onMembers: onMembers,
         onRename: onRename,
+        avatars: avatars,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -128,8 +131,10 @@ class RoomList extends StatelessWidget {
     this.onDelete,
     this.onMembers,
     this.onRename,
+    this.avatars,
   });
 
+  final AvatarStore? avatars;
   final List<Room>? rooms;
   final Object? error;
   final String? selected;
@@ -156,6 +161,7 @@ class RoomList extends StatelessWidget {
     onDelete: onDelete == null ? null : () => onDelete!(room),
     onMembers: onMembers == null ? null : () => onMembers!(room),
     onRename: onRename == null ? null : () => onRename!(room),
+    avatars: avatars,
   );
 
   @override
@@ -283,7 +289,9 @@ class _RoomTile extends StatelessWidget {
     this.onDelete,
     this.onMembers,
     this.onRename,
+    this.avatars,
   });
+  final AvatarStore? avatars;
   final Room room;
   final bool selected;
   final VoidCallback onTap;
@@ -348,7 +356,7 @@ class _RoomTile extends StatelessWidget {
       child: ListTile(
         selected: selected,
         selectedTileColor: scheme.secondaryContainer,
-        leading: _Initial(room.name),
+        leading: Avatar(name: room.name, image: avatars?.forRoom(room)),
         title: Text(
           room.name,
           maxLines: 1,
@@ -492,24 +500,6 @@ Offset _centerOf(BuildContext context) {
   return box.localToGlobal(box.size.center(Offset.zero));
 }
 
-class _Initial extends StatelessWidget {
-  const _Initial(this.name);
-  final String name;
-  @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-    child: CircleAvatar(
-      backgroundColor:
-          Theme.of(context).extension<AvatarColors>()?.background ?? talaBlue,
-      foregroundColor: Colors.white,
-      // White on the icon's blue is 4.17:1, which needs large, bold text.
-      child: Text(
-        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-      ),
-    ),
-  );
-}
-
 class _Banner extends StatelessWidget {
   const _Banner(this.text);
   final String text;
@@ -533,6 +523,7 @@ class ConversationPane extends StatefulWidget {
     required this.onBack,
     required this.onCall,
     this.onMembers,
+    this.avatars,
     this.showHeader = true,
   });
 
@@ -544,6 +535,7 @@ class ConversationPane extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onCall;
   final VoidCallback? onMembers;
+  final AvatarStore? avatars;
 
   /// Off inside a call, which already has the name and the controls.
   final bool showHeader;
@@ -911,6 +903,7 @@ class _ConversationPaneState extends State<ConversationPane> {
             if (_mentionOptions.isNotEmpty)
               _MentionList(
                 options: _mentionOptions,
+                avatars: widget.avatars,
                 highlighted: _mentionHighlight,
                 onPick: _pickMention,
               ),
@@ -985,6 +978,21 @@ class _ConversationPaneState extends State<ConversationPane> {
                 message: m,
                 own: m.actorType == 'users' && m.actorId == selfId,
                 showName: !grouped,
+                // A one-to-one's header already says who this is.
+                avatar: !widget.room.hasMembers
+                    ? null
+                    : grouped
+                    ? const SizedBox(width: _messageAvatarWidth)
+                    : Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Avatar(
+                          radius: _messageAvatarRadius,
+                          name: m.actorName.isEmpty ? 'Guest' : m.actorName,
+                          image: m.actorType == 'users'
+                              ? widget.avatars?.forUser(m.actorId)
+                              : null,
+                        ),
+                      ),
                 canInteract: widget.room.canChat,
                 onReply: () => _startReply(m),
                 onReact: (emoji) => _react(m, emoji),
@@ -1023,7 +1031,9 @@ class _MentionList extends StatelessWidget {
     required this.options,
     required this.highlighted,
     required this.onPick,
+    this.avatars,
   });
+  final AvatarStore? avatars;
   final List<MentionOption> options;
   final int highlighted;
   final ValueChanged<MentionOption> onPick;
@@ -1045,11 +1055,15 @@ class _MentionList extends StatelessWidget {
                 dense: true,
                 selected: i == highlighted,
                 selectedTileColor: scheme.secondaryContainer,
-                leading: Icon(
-                  o.isEveryone || o.isGroup
-                      ? Icons.groups_outlined
-                      : Icons.person_outline,
-                ),
+                leading: o.isEveryone || o.isGroup
+                    ? const Icon(Icons.groups_outlined)
+                    : Avatar(
+                        radius: 16,
+                        name: o.label,
+                        image: o.source == 'users'
+                            ? avatars?.forUser(o.id)
+                            : null,
+                      ),
                 title: Text(
                   o.label,
                   maxLines: 1,
@@ -1204,11 +1218,20 @@ class _ComposerBar extends StatelessWidget {
   }
 }
 
+const _messageAvatarRadius = 16.0;
+const _messageAvatarWidth = _messageAvatarRadius * 2 + 8;
+
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.own, required this.child, this.actions});
+  const _Bubble({
+    required this.own,
+    required this.child,
+    this.actions,
+    this.avatar,
+  });
   final bool own;
   final Widget child;
   final Widget? actions;
+  final Widget? avatar;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1236,7 +1259,10 @@ class _Bubble extends StatelessWidget {
         mainAxisAlignment: own
             ? MainAxisAlignment.end
             : MainAxisAlignment.start,
+        // A tall message keeps its avatar and its buttons in view at the top.
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (!own) ?avatar,
           if (own && side != null) side,
           bubble,
           if (!own && side != null) side,
@@ -1398,6 +1424,7 @@ class _MessageBubble extends StatefulWidget {
     required this.message,
     required this.own,
     required this.showName,
+    this.avatar,
     required this.canInteract,
     required this.onReply,
     required this.onReact,
@@ -1412,6 +1439,10 @@ class _MessageBubble extends StatefulWidget {
   final ChatMessage message;
   final bool own;
   final bool showName;
+
+  /// Beside other people's messages in a group; empty space to line up the
+  /// later messages in a run.
+  final Widget? avatar;
   final bool canInteract;
   final VoidCallback onReply;
   final ValueChanged<String> onReact;
@@ -1472,6 +1503,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
         onSecondaryTapUp: (d) => _menu(d.globalPosition),
         child: _Bubble(
           own: widget.own,
+          avatar: widget.avatar,
           actions: _MessageActions(
             visible: _hover,
             onReply: canReply ? widget.onReply : null,

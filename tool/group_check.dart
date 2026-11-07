@@ -80,6 +80,20 @@ void main() {
     );
     expect(sent.text, contains('@nobody'));
 
+    // Set up by hand on the container: bob has a chosen picture, alice doesn't.
+    if (env['TALA_GROUP_CHECK_BOB_HAS_AVATAR'] == '1') {
+      expect(await alice.userAvatar('bob'), isNotNull);
+      expect(await alice.userAvatar('alice'), isNull);
+      expect(await alice.userAvatar('nobody-by-this-name'), isNull);
+      expect(await alice.roomAvatar(token), isNull, reason: 'a default SVG');
+      final oneToOne = await alice.startOneToOne('bob');
+      final room = (await alice.rooms()).firstWhere((r) => r.token == oneToOne);
+      expect(room.otherUserId, 'bob');
+      final image = alice.avatars.forRoom(room)!;
+      await image.ready;
+      expect(image.bytes, isNotNull);
+    }
+
     // Bob sees it, but can't manage it.
     final bobRoom = await roomOf(bob);
     expect(bobRoom.canManage, isFalse);

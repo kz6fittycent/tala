@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'app_info.dart';
+import 'avatars.dart';
 import 'chat.dart';
 import 'chat_alerts.dart';
 import 'incoming_calls.dart';
@@ -46,6 +47,9 @@ class Room {
     this.remoteServer = '',
     this.hasPassword = false,
     this.canDelete = false,
+    this.otherUserId = '',
+    this.customAvatar = false,
+    this.avatarVersion = '',
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -86,6 +90,10 @@ class Room {
       remoteServer: r['remoteServer'] as String? ?? '',
       hasPassword: r['hasPassword'] == true,
       canDelete: r['canDeleteConversation'] == true,
+      // A one-to-one's internal name is the other person's user id.
+      otherUserId: type == 1 ? r['name'] as String? ?? '' : '',
+      customAvatar: r['isCustomAvatar'] == true,
+      avatarVersion: r['avatarVersion'] as String? ?? '',
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -116,6 +124,10 @@ class Room {
 
   /// Guests need a password as well as the link.
   final bool hasPassword;
+
+  final String otherUserId;
+  final bool customAvatar;
+  final String avatarVersion;
 
   /// Conversations with a member list. One-to-ones always have the same two
   /// people, and the others are system conversations.
@@ -657,6 +669,52 @@ class NcApi implements CallSource, ChatSource {
       for (final o in d as List)
         MentionOption.fromJson((o as Map).cast<String, dynamic>()),
     ];
+  }
+
+  /// Null if the user has only the picture the server generates, so Tala's own
+  /// letter shows instead, or if there's no such user.
+  Future<Uint8List?> userAvatar(String userId) => _avatar(
+    '/index.php/avatar/${Uri.encodeComponent(userId)}/128',
+    needsCustomHeader: true,
+  );
+
+  /// Null for an SVG, such as a default or emoji avatar, which Tala can't draw.
+  Future<Uint8List?> roomAvatar(String token) =>
+      _avatar('/ocs/v2.php/apps/spreed/api/v1/room/$token/avatar');
+
+  late final AvatarStore avatars = AvatarStore(
+    fetchUser: userAvatar,
+    fetchRoom: roomAvatar,
+  );
+
+  static const _maxAvatarBytes = 2 * 1024 * 1024;
+
+  Future<Uint8List?> _avatar(
+    String path, {
+    bool needsCustomHeader = false,
+  }) async {
+    final req = await _http.getUrl(Uri.parse('${creds.server}$path'));
+    _authHeaders(req);
+    req.headers.set('OCS-APIRequest', 'true');
+    req.cookies.addAll(_cookies.values);
+    final res = await req.close();
+    final type = res.headers.contentType;
+    final usable =
+        res.statusCode == 200 &&
+        type?.primaryType == 'image' &&
+        !(type?.subType.contains('svg') ?? true) &&
+        (!needsCustomHeader || res.headers.value('x-nc-iscustomavatar') == '1');
+    if (!usable) {
+      await res.drain<void>();
+      if (res.statusCode >= 500) throw ApiException(res.statusCode, path);
+      return null;
+    }
+    final out = BytesBuilder(copy: false);
+    await for (final chunk in res) {
+      out.add(chunk);
+      if (out.length > _maxAvatarBytes) return null;
+    }
+    return out.takeBytes();
   }
 
   @override

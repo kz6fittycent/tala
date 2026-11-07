@@ -714,6 +714,7 @@ class _RoomsPageState extends State<RoomsPage> {
         name: room.name,
         selfId: room.selfId,
         canManage: room.canManage,
+        avatars: widget.api.avatars,
         load: () => widget.api.members(room.token),
         search: widget.api.searchPeople,
         add: (id) => widget.api.addMember(room.token, id),
@@ -999,6 +1000,7 @@ class _RoomsPageState extends State<RoomsPage> {
           onDelete: _deleteRoom,
           onMembers: _showMembers,
           onRename: _renameRoom,
+          avatars: widget.api.avatars,
           banner: _invites.isEmpty
               ? null
               : InviteBanners(
@@ -1016,6 +1018,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   onBack: () => _select(null),
                   onCall: () => _openCall(selected!),
                   onMembers: () => _showMembers(selected!),
+                  avatars: widget.api.avatars,
                 ),
         ),
       ),
@@ -1118,6 +1121,7 @@ class _CallPageState extends State<CallPage> {
                     room: widget.room,
                     drafts: widget.drafts,
                     showHeader: false,
+                    avatars: widget.api.avatars,
                     onBack: () {},
                     onCall: () {},
                   )
