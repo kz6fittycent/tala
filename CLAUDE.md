@@ -92,7 +92,7 @@ Checked: `tool/group_check.dart` with `TALA_GROUP_CHECK_BOB_HAS_AVATAR=1` after 
 Links only open http and https, through `safeUrl`, and an unsafe one stays as typed. A label can differ from its address, as on the web. `snake_case`, `2 * 3 * 4`, and underscores or asterisks in bare addresses stay untouched; placeholders like `{mention-user1}` are atomic. A delimiter with no closer is remembered so hostile messages don't go quadratic; a test covers them.
 Checked: `tool/group_check.dart` on Nextcloud 35.0.2 and Talk 25.0.7. `tool/make_screenshots.dart` loads DejaVu Sans Mono as `monospace`, because tests have no system fonts.
 
-## Message search (built 2026-11-07, not released, not yet seen by the user)
+## Message search (built 2026-11-07, released in 0.5.0, not yet seen by the user)
 `lib/src/search.dart`. `SearchDialog` opens from a button by Refresh (all conversations) and one in a conversation's header (that conversation, via `conversation=`). It uses unified search, `/ocs/v2.php/search/providers/talk-message/search`, with a 400ms pause and latest-wins. "Show more" appears only after a full page of 20, because the server sends a cursor even with nothing left.
 A result opens `MessageContextDialog`: up to 15 messages each side from `chat/{token}/{id}/context`, with the hit highlighted and full dates with the year. Open conversation just selects the conversation at its latest messages. This panel instead of a true jump is my choice, flagged to the user: scrolling the live chat back could mean loading thousands of messages.
 Excerpts are the server's raw source, so `plainExcerpt` strips Markdown. Errors log only the status: the term is in the request path, and `maskReportText` wouldn't catch it.
