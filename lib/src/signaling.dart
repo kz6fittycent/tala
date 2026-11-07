@@ -13,16 +13,26 @@ class SignalingError implements Exception {
   String toString() => 'signaling error $code: $text';
 }
 
+/// What a call needs from signaling, however it travels.
+abstract class CallSignaling {
+  String? get sessionId;
+  set onMessage(void Function(Map<String, dynamic> message)? handler);
+  void send(String recipientSession, Map<String, dynamic> data);
+  Future<void> close();
+}
+
 /// Client for the external signaling server (protocol in strukturag's
 /// nextcloud-spreed-signaling docs/standalone-signaling-api-v1.md).
-class Signaling {
+class Signaling implements CallSignaling {
   WebSocket? _ws;
   int _nextId = 1;
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
 
+  @override
   String? sessionId;
   List<String> features = const [];
 
+  @override
   void Function(Map<String, dynamic> message)? onMessage;
   void Function(Map<String, dynamic> event)? onEvent;
   void Function()? onClosed;
@@ -68,6 +78,7 @@ class Signaling {
     log('signaling: joined room');
   }
 
+  @override
   void send(String recipientSession, Map<String, dynamic> data) {
     _ws?.add(jsonEncode({
       'type': 'message',
@@ -114,6 +125,7 @@ class Signaling {
     }
   }
 
+  @override
   Future<void> close() async {
     await _ws?.close();
     _ws = null;

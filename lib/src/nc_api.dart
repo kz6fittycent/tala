@@ -567,9 +567,9 @@ class NcApi implements CallSource, ChatSource {
   }
 
   Future<dynamic> _ocs(String method, String path,
-      {Map<String, dynamic>? body}) async {
+      {Map<String, dynamic>? body, HttpClient? via}) async {
     final uri = Uri.parse('${creds.server}$path');
-    final req = await _http.openUrl(method, uri);
+    final req = await (via ?? _http).openUrl(method, uri);
     req.headers
       ..set('OCS-APIRequest', 'true')
       ..set('Accept', 'application/json')
@@ -717,6 +717,15 @@ class NcApi implements CallSource, ChatSource {
       SignalingSettings((await _ocs(
               'GET', '$_talkV3/signaling/settings?token=$token') as Map)
           .cast<String, dynamic>());
+
+  /// Internal signaling's long poll, which the server holds for up to 30s. The
+  /// server finds the session through the cookies set when joining the room.
+  Future<Object?> pullSignaling(String token, HttpClient client) =>
+      _ocs('GET', '$_talkV3/signaling/$token', via: client)
+          .timeout(const Duration(seconds: 45));
+
+  Future<void> sendSignaling(String token, String messages) =>
+      _ocs('POST', '$_talkV3/signaling/$token', body: {'messages': messages});
 
   String get signalingBackendUrl => '${creds.server}$_talkV3/signaling/backend';
 

@@ -57,6 +57,52 @@ Future<void> main(List<String> args) async {
     await NcApi(creds).chatCheck();
     exit(0);
   }
+  if (args.contains('--call-check')) {
+    // Joins one call using the account in TALA_CHECK_*, for a test server. It
+    // never touches the keyring or the real account. With --call-check-audio it
+    // opens the default mic, which a check points at a silent source through
+    // PULSE_SOURCE. Only --call-check-camera opens the camera.
+    final env = Platform.environment;
+    final room = Room(env['TALA_CHECK_TOKEN']!, 'check', false, 2);
+    final api = NcApi(
+      Credentials(
+        env['TALA_CHECK_SERVER']!,
+        env['TALA_CHECK_USER']!,
+        env['TALA_CHECK_PASSWORD']!,
+      ),
+    );
+    final call = Call(
+      api,
+      room,
+      answering: true, // No ringback tone on the user's speakers.
+      openMedia: () async {
+        // Stands in for a camera that's slow to open.
+        final delay = int.parse(env['TALA_CHECK_MEDIA_DELAY'] ?? '0');
+        await Future<void>.delayed(Duration(seconds: delay));
+        if (args.contains('--call-check-camera')) {
+          return navigator.mediaDevices.getUserMedia({
+            'audio': true,
+            'video': true,
+          });
+        }
+        return args.contains('--call-check-audio')
+            ? navigator.mediaDevices.getUserMedia({
+                'audio': true,
+                'video': false,
+              })
+            : null;
+      },
+    );
+    unawaited(call.start());
+    final seconds = int.parse(env['TALA_CHECK_SECONDS'] ?? '45');
+    for (var i = 0; i < seconds ~/ 5; i++) {
+      await Future<void>.delayed(const Duration(seconds: 5));
+      log('check: ${call.state}, remotes ${call.remotes.length}, '
+          '${await call.meshStats()}');
+    }
+    await call.hangUp();
+    exit(0);
+  }
   if (args.contains('--report-check')) {
     // What a report would hold, without sending anything.
     Credentials? creds;

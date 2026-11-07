@@ -31,9 +31,9 @@ The people and conversations in these pictures are made up.
   yet tested against a real one)
 - Light, dark and system themes with six accent colors
 
-Calls currently need a server with Talk's
+Calls work with or without Talk's
 [High Performance Backend](https://nextcloud-talk.readthedocs.io/en/latest/quick-install/).
-Chat works without it.
+Without it, everyone connects directly, which suits small calls.
 
 ## Install
 
