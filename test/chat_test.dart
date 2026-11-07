@@ -678,6 +678,81 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    group('formatted messages', () {
+      ChatMessage formatted(String raw) => ChatMessage.fromJson({
+        'id': 1,
+        'actorType': 'users',
+        'actorId': 'x',
+        'actorDisplayName': 'Xan',
+        'timestamp': 1700000000,
+        'markdown': true,
+        'message': raw,
+      });
+
+      testWidgets('every block fits a narrow window', (tester) async {
+        tester.view.physicalSize = const Size(320, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final src = FakeSource()
+          ..history = ((_) => [
+            formatted(
+              '# A long heading that needs to wrap around the narrow bubble\n'
+              '- A list item long enough that it has to wrap in a narrow one\n'
+              '  - And a nested one, also long enough that it has to wrap\n'
+              '> A quote long enough that it has to wrap in a narrow bubble\n'
+              '---\n'
+              '```\na very long line of code that cannot wrap and must scroll\n```',
+            ),
+          ]);
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.textContaining('A long heading', findRichText: true), findsOneWidget);
+        expect(find.textContaining('must scroll', findRichText: true), findsOneWidget);
+        expect(find.text('•'), findsNWidgets(2));
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('a link in a formatted message is tappable', (tester) async {
+        final src = FakeSource()
+          ..history = ((_) => [formatted('see [the map](https://x.example/m)')]);
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pumpAndSettle();
+        final text = tester.widget<RichText>(
+          find.textContaining('the map', findRichText: true),
+        );
+        final spans = <TextSpan>[];
+        text.text.visitChildren((s) {
+          if (s is TextSpan) spans.add(s);
+          return true;
+        });
+        final link = spans.firstWhere((s) => s.text == 'the map');
+        expect(link.recognizer, isNotNull);
+        expect(link.style?.decoration, TextDecoration.underline);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('the same words stay as typed when the server says plain', (
+        tester,
+      ) async {
+        final src = FakeSource()
+          ..history = ((_) => [
+            ChatMessage.fromJson({
+              'id': 1,
+              'actorType': 'users',
+              'actorId': 'x',
+              'timestamp': 1700000000,
+              'markdown': false,
+              'message': '**not bold**',
+            }),
+          ]);
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('**not bold**', findRichText: true), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      });
+    });
+
     group('mention suggestions', () {
       FakeSource source() => FakeSource()
         ..history = ((_) => [msg(1)])

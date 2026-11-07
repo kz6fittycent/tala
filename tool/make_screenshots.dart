@@ -81,9 +81,10 @@ final _chat = [
 ];
 
 class _DemoSource implements ChatSource {
+  List<ChatMessage>? only;
   @override
   Future<List<ChatMessage>> chatHistory(String t, {int? beforeId}) async =>
-      beforeId == null ? _chat : [];
+      beforeId == null ? (only ?? _chat) : [];
   @override
   Future<List<ChatMessage>> chatWait(String t, int afterId) =>
       Completer<List<ChatMessage>>().future;
@@ -272,6 +273,15 @@ void main() {
       'Roboto-Bold.ttf',
     ]);
     await _loadFont('MaterialIcons', ['MaterialIcons-Regular.otf']);
+    // Tests have no system fonts, so code would draw as empty boxes without it.
+    const mono = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf';
+    if (File(mono).existsSync()) {
+      final loader = FontLoader('monospace');
+      loader.addFont(
+        Future.value(ByteData.sublistView(File(mono).readAsBytesSync())),
+      );
+      await loader.load();
+    }
   });
 
   Future<void> scene(
@@ -376,6 +386,51 @@ void main() {
         await t.enterText(find.byType(TextField).last, 'Are you coming, @ma');
         await t.pump(const Duration(milliseconds: 300));
       },
+    );
+  });
+
+  testWidgets('markdown', (t) {
+    final settings = AppSettings();
+    return scene(
+      t,
+      'markdown',
+      Scaffold(
+        body: ChatLayout(
+          rooms: _rooms,
+          roomsError: null,
+          selected: _hike,
+          onSelect: (_) {},
+          onRefresh: () {},
+          onRemove: (_) {},
+          onArchive: (_) {},
+          settings: settings,
+          conversation: ConversationPane(
+            source: _DemoSource()..only = [
+              ChatMessage.fromJson({
+                'id': 1,
+                'actorType': 'users',
+                'actorId': 'maya',
+                'actorDisplayName': 'Maya Chen',
+                'timestamp': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+                'markdown': true,
+                'message':
+                    '## Saturday plan\n\n'
+                    'We meet at **8 sharp**, *rain or shine*. ~~Lunch at the '
+                    'lake~~ is off. See [the trail map](https://example.com/map).\n\n'
+                    '- Water and snacks\n- Rain jacket\n  - Spare socks\n\n'
+                    '1. Park at the gate\n2. Run `check-in --all`\n\n'
+                    '> Bring a layer. It gets cold up there.\n\n'
+                    '```\ntrailhead: north gate\nstart: 08:00\n```\n\n'
+                    'Leave_it_as_typed: snake_case and 2 * 3 * 4.',
+              }),
+            ],
+            room: _hike,
+            drafts: {},
+            onBack: () {},
+            onCall: () {},
+          ),
+        ),
+      ),
     );
   });
 

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'chat.dart';
 import 'log.dart';
+import 'markdown.dart';
 import 'mentions.dart';
 import 'nc_api.dart';
 import 'settings.dart';
@@ -1529,7 +1530,11 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     segment: s,
                     bytes: widget.preview(s.previewFileId!),
                   ),
-              _MessageText(message.segments, italic: message.isDeleted),
+              _MessageText(
+                message.segments,
+                blocks: message.blocks,
+                italic: message.isDeleted,
+              ),
               if (message.reactions.isNotEmpty)
                 _Reactions(
                   message: message,
@@ -1577,8 +1582,9 @@ class _Quote extends StatelessWidget {
 
 /// Stateful only to dispose the tap handlers on its links.
 class _MessageText extends StatefulWidget {
-  const _MessageText(this.segments, {this.italic = false});
+  const _MessageText(this.segments, {this.blocks, this.italic = false});
   final List<Segment> segments;
+  final List<MdBlock>? blocks;
   final bool italic;
   @override
   State<_MessageText> createState() => _MessageTextState();
@@ -1612,24 +1618,111 @@ class _MessageTextState extends State<_MessageText> {
       decoration: TextDecoration.underline,
     );
     final mouse = tap != null ? SystemMouseCursors.click : MouseCursor.defer;
-    return switch (s.kind) {
-      SegmentKind.text => TextSpan(text: s.text),
-      SegmentKind.mention => TextSpan(
-        text: '@${s.text}',
-        style: const TextStyle(fontWeight: FontWeight.bold),
+    final kindStyle = switch (s.kind) {
+      SegmentKind.text => null,
+      SegmentKind.mention => const TextStyle(fontWeight: FontWeight.bold),
+      SegmentKind.file => tap != null ? link : null,
+      SegmentKind.link => link,
+    };
+    final format = _formatStyle(s.style, scheme);
+    return TextSpan(
+      text: s.kind == SegmentKind.mention
+          ? '@${s.text}'
+          : s.kind == SegmentKind.file
+          ? '📎 ${s.text}'
+          : s.text,
+      style: kindStyle == null ? format : kindStyle.merge(format),
+      recognizer: tap,
+      mouseCursor: mouse,
+    );
+  }
+
+  /// Null when plain, so a plain message's spans stay as simple as they were.
+  TextStyle? _formatStyle(MdStyle m, ColorScheme scheme) {
+    if (m.isPlain) return null;
+    return TextStyle(
+      fontWeight: m.bold ? FontWeight.bold : null,
+      fontStyle: m.italic ? FontStyle.italic : null,
+      decoration: m.strike ? TextDecoration.lineThrough : null,
+      fontFamily: m.code ? 'monospace' : null,
+      fontFamilyFallback: m.code ? _monospaceFallback : null,
+      backgroundColor: m.code ? scheme.onSurface.withValues(alpha: 0.1) : null,
+    );
+  }
+
+  Widget _rich(List<Segment> segments, ThemeData theme, {TextStyle? style}) =>
+      Text.rich(
+        TextSpan(
+          style: widget.italic
+              ? const TextStyle(fontStyle: FontStyle.italic).merge(style)
+              : style,
+          children: [for (final s in segments) _span(s, theme)],
+        ),
+      );
+
+  Widget _block(MdBlock b, ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return switch (b.kind) {
+      MdKind.paragraph => _rich(b.segments, theme),
+      MdKind.heading => _rich(
+        b.segments,
+        theme,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: switch (b.level) {
+            1 => 20,
+            2 => 18,
+            _ => 16,
+          },
+        ),
       ),
-      SegmentKind.file => TextSpan(
-        text: '📎 ${s.text}',
-        style: tap != null ? link : null,
-        recognizer: tap,
-        mouseCursor: mouse,
+      MdKind.quote => Container(
+        padding: const EdgeInsets.only(left: 8),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: scheme.outline, width: 3)),
+        ),
+        child: _rich(b.segments, theme),
       ),
-      SegmentKind.link => TextSpan(
-        text: s.text,
-        style: link,
-        recognizer: tap,
-        mouseCursor: mouse,
+      MdKind.listItem => Padding(
+        padding: EdgeInsets.only(left: 12.0 * b.level),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(b.marker),
+            const SizedBox(width: 6),
+            Flexible(child: _rich(b.segments, theme)),
+          ],
+        ),
       ),
+      // Scrolls sideways: wrapping would break what the code means.
+      MdKind.code => Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: scheme.onSurface.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Text.rich(
+            TextSpan(
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontFamilyFallback: _monospaceFallback,
+              ),
+              children: [
+                for (final s in b.segments)
+                  TextSpan(
+                    text: s.kind == SegmentKind.mention
+                        ? '@${s.text}'
+                        : s.text,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      MdKind.rule => const SizedBox(width: 120, child: Divider()),
     };
   }
 
@@ -1637,16 +1730,25 @@ class _MessageTextState extends State<_MessageText> {
   Widget build(BuildContext context) {
     _clearTaps();
     final theme = Theme.of(context);
-    return Text.rich(
-      TextSpan(
-        style: widget.italic
-            ? const TextStyle(fontStyle: FontStyle.italic)
-            : null,
-        children: [for (final s in widget.segments) _span(s, theme)],
-      ),
+    final blocks = widget.blocks;
+    if (blocks == null) {
+      return _rich(widget.segments, theme);
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (i, b) in blocks.indexed)
+          Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
+            child: _block(b, theme),
+          ),
+      ],
     );
   }
 }
+
+const _monospaceFallback = ['DejaVu Sans Mono', 'Noto Sans Mono', 'Liberation Mono'];
 
 class _OutgoingBubble extends StatelessWidget {
   const _OutgoingBubble({

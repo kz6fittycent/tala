@@ -80,6 +80,19 @@ void main() {
     );
     expect(sent.text, contains('@nobody'));
 
+    // Formatting, as the server flags and returns it.
+    final formatted = await alice.chatSend(
+      token,
+      '**bold** ${picked.expand(bobShown)}\n- item',
+      'group-check-markdown',
+    );
+    expect(formatted.blocks, isNotNull);
+    expect(formatted.text, contains('bold'));
+    expect(formatted.text, isNot(contains('**')));
+    final history = await alice.chatHistory(token);
+    final created = history.firstWhere((m) => m.isSystem);
+    expect(created.blocks, isNull, reason: 'system messages aren\'t formatted');
+
     // Set up by hand on the container: bob has a chosen picture, alice doesn't.
     if (env['TALA_GROUP_CHECK_BOB_HAS_AVATAR'] == '1') {
       expect(await alice.userAvatar('bob'), isNotNull);

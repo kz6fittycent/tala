@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'log.dart';
+import 'markdown.dart';
 import 'mentions.dart';
 
 class ApiException implements Exception {
@@ -19,9 +20,24 @@ enum SegmentKind { text, mention, file, link }
 
 /// One styled run of a message's text.
 class Segment {
-  const Segment(this.text, this.kind, [this.url, this.previewFileId]);
+  const Segment(this.text, this.kind, [this.url, this.previewFileId])
+    : style = const MdStyle();
+  const Segment.styled(
+    this.text,
+    this.kind,
+    this.url,
+    this.previewFileId,
+    this.style,
+  );
   final String text;
   final SegmentKind kind;
+
+  /// Bold and so on, from a Markdown message.
+  final MdStyle style;
+
+  Segment withStyle(MdStyle added) => style.isPlain && added.isPlain
+      ? this
+      : Segment.styled(text, kind, url, previewFileId, style.plus(added));
 
   /// Set on an image file the server can show a preview of.
   final int? previewFileId;
@@ -137,6 +153,7 @@ class ChatMessage {
     this.reactions = const {},
     this.reactionsSelf = const [],
     this.editSource = '',
+    this.blocks,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) {
@@ -144,13 +161,18 @@ class ChatMessage {
     final raw = j['message'] as String? ?? '';
     final params = _map(j['messageParameters']);
     final hasParent = parent['id'] is int;
+    // The server's call: system messages and old servers' messages aren't.
+    final blocks = j['markdown'] == true ? parseMarkdown(raw, params) : null;
     return ChatMessage(
       id: j['id'] as int? ?? 0,
       actorType: j['actorType'] as String? ?? '',
       actorId: j['actorId'] as String? ?? '',
       actorName: j['actorDisplayName'] as String? ?? '',
       timestamp: j['timestamp'] as int? ?? 0,
-      segments: parseMessage(raw, params),
+      segments: blocks != null
+          ? flattenMarkdown(blocks)
+          : parseMessage(raw, params),
+      blocks: blocks,
       editSource: editableText(raw, params),
       systemKind: j['systemMessage'] as String? ?? '',
       type: j['messageType'] as String? ?? 'comment',
@@ -176,6 +198,9 @@ class ChatMessage {
   final String actorName;
   final int timestamp;
   final List<Segment> segments;
+
+  /// How to lay out a formatted message. Null means [segments] as one paragraph.
+  final List<MdBlock>? blocks;
   final String systemKind;
   final String type;
   final String referenceId;
@@ -226,6 +251,7 @@ class ChatMessage {
       actorName: actorName,
       timestamp: timestamp,
       segments: segments,
+      blocks: blocks,
       systemKind: systemKind,
       type: type,
       referenceId: referenceId,
