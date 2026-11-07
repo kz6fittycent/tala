@@ -30,22 +30,37 @@ String get reportUrl => Platform.environment['TALA_REPORT_URL'] ?? _relayUrl;
 // ---------------------------------------------------------------------------
 // Masking. These logs quote raw error text, which can hold URLs and addresses.
 
-final _url = RegExp(r'\b(https?|wss?|stuns?|turns?):(//)?[^\s/"' "'" r'),\]]+');
+final _url = RegExp(
+  r'\b(https?|wss?|stuns?|turns?):(//)?[^\s/"'
+  "'"
+  r'),\]]+',
+);
 final _tokenPath = RegExp(r'/(room|call|chat|token)/[A-Za-z0-9]{4,}');
 final _tokenQuery = RegExp(r'\btoken=[A-Za-z0-9_-]+');
 final _email = RegExp(r'\b[\w.+-]+@[\w-]+(\.[\w-]+)+\b');
-final _home = RegExp(r'/(home|Users)/[^/\s"' "'" r'`)\]]+');
+final _home = RegExp(
+  r'/(home|Users)/[^/\s"'
+  "'"
+  r'`)\]]+',
+);
 final _ipv4 = RegExp(r'\b\d{1,3}(\.\d{1,3}){3}\b');
 final _ipv6 = RegExp(
   r'(?<![\w:])(?:[0-9a-fA-F]{1,4}:){4,7}[0-9a-fA-F]{1,4}(?![\w:])'
   r'|(?<![\w:])(?:[0-9a-fA-F]{1,4}:)+:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*)?(?![\w:])',
 );
-final _domain = RegExp(
-  r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b',
-);
+final _domain = RegExp(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b');
 // File names and D-Bus names look like domains and help with diagnosis.
 const _notDomainEndings = {
-  'dart', 'txt', 'json', 'wav', 'png', 'so', 'cc', 'js', 'yaml', 'desktop',
+  'dart',
+  'txt',
+  'json',
+  'wav',
+  'png',
+  'so',
+  'cc',
+  'js',
+  'yaml',
+  'desktop',
   'php',
 };
 const _notDomainStarts = {'org', 'com', 'io', 'net', 'dart', 'package'};
@@ -78,10 +93,7 @@ String maskReportText(
       .replaceAll(_home, '~')
       .replaceAll(_ipv4, '[ip]')
       .replaceAll(_ipv6, '[ip]')
-      .replaceAllMapped(
-        _domain,
-        (m) => _keepDotted(m[0]!) ? m[0]! : '[host]',
-      );
+      .replaceAllMapped(_domain, (m) => _keepDotted(m[0]!) ? m[0]! : '[host]');
   // Short names would match ordinary words.
   if (user != null && user.length >= 3) {
     out = out.replaceAll(
@@ -188,9 +200,8 @@ void recordDartError(Object error, StackTrace? stack, {Directory? dir}) {
   if (isNetworkError(error) || _crashed) return;
   _crashed = true;
   try {
-    File('${(dir ?? configDir).path}/crash.json').writeAsStringSync(
-      jsonEncode(crash.toJson()),
-    );
+    File('${(dir ?? configDir).path}/crash.json')
+        .writeAsStringSync(jsonEncode(crash.toJson()));
   } on FileSystemException catch (e) {
     log('report: could not save the crash: ${e.osError?.message}');
   }
@@ -235,7 +246,8 @@ Crash? previousCrash({Directory? dir}) {
       message: '',
       fingerprint: reportFingerprint('signal|$signal'),
       version: '(previous session)',
-      details: 'A fatal signal stopped the app; the log shows what it was doing.',
+      details:
+          'A fatal signal stopped the app; the log shows what it was doing.',
     );
   } on FileSystemException {
     return null;
@@ -327,7 +339,9 @@ String readRecentLog({Directory? dir}) {
   return line < 0 ? tail : tail.substring(line + 1);
 }
 
-/// `/etc/os-release` inside a snap is the base's; the host's is under hostfs.
+/// `/etc/os-release` inside a snap is the base's; the host's is under hostfs,
+/// which confinement allows only with system-observe. Tala doesn't plug that,
+/// so a snap normally gets [kernelFact] alone.
 String reportPlatform() {
   String? prettyName(String path) {
     try {
@@ -354,6 +368,22 @@ String reportPlatform() {
   ].join(' · ');
 }
 
+/// The kernel's version line names its build compiler, which usually reveals
+/// the distribution and release. A snap can read it without any plug. The
+/// builder's name is dropped, because it says nothing useful.
+String kernelFact(String procVersion) {
+  final line = procVersion.trim().replaceFirst(
+    RegExp(r' \([^()]*@[^()]*\)'),
+    '',
+  );
+  final cut = line.indexOf(' #');
+  final text = (cut < 0 ? line : line.substring(0, cut)).replaceFirst(
+    'Linux version ',
+    '',
+  );
+  return text.length > 160 ? text.substring(0, 160) : text;
+}
+
 /// What Tala can find out itself, so nobody has to ask the user.
 Future<String> gatherFacts({NcApi? api, AppTray? tray}) async {
   final env = Platform.environment;
@@ -371,6 +401,9 @@ Future<String> gatherFacts({NcApi? api, AppTray? tray}) async {
     }
   }
 
+  await add('Kernel', () async {
+    return kernelFact(await File('/proc/version').readAsString());
+  });
   await add('Tray host', () async {
     return await (tray ?? AppTray()).available() ? 'yes' : 'no';
   });
@@ -469,7 +502,9 @@ ReportOutcome classifyReply(int status, String body) {
     json = null;
   }
   final map = json is Map ? json : const {};
-  final error = map['error'] is String ? map['error'] as String : 'HTTP $status';
+  final error = map['error'] is String
+      ? map['error'] as String
+      : 'HTTP $status';
   if (status == 200 || status == 201) {
     return ReportOutcome(
       map['duplicate'] == true ? ReportResult.duplicate : ReportResult.sent,
@@ -492,7 +527,10 @@ Future<ReportOutcome> postReport(Report report, {String? url}) async {
     request.headers.contentType = ContentType.json;
     request.add(utf8.encode(jsonEncode(report.toJson())));
     final response = await request.close().timeout(_requestTimeout);
-    final body = await utf8.decoder.bind(response).join().timeout(_requestTimeout);
+    final body = await utf8.decoder
+        .bind(response)
+        .join()
+        .timeout(_requestTimeout);
     return classifyReply(response.statusCode, body);
   } catch (e) {
     return ReportOutcome(ReportResult.failed, e.runtimeType.toString());
@@ -525,8 +563,12 @@ List<File> pendingReports({Directory? dir}) {
 bool _savePending(Report report, {Directory? dir}) {
   try {
     final d = _pendingDir(dir)..createSync(recursive: true);
-    final stamp = DateTime.now().microsecondsSinceEpoch.toString().padLeft(20, '0');
-    File('${d.path}/$stamp.json').writeAsStringSync(jsonEncode(report.toJson()));
+    final stamp = DateTime.now().microsecondsSinceEpoch.toString().padLeft(
+      20,
+      '0',
+    );
+    File('${d.path}/$stamp.json')
+        .writeAsStringSync(jsonEncode(report.toJson()));
     final all = pendingReports(dir: dir);
     if (all.length > _pendingMaxFiles) {
       for (final old in all.take(all.length - _pendingMaxFiles)) {

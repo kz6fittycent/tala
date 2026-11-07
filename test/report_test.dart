@@ -348,4 +348,17 @@ void main() {
       expect(find.text('Don\'t send'), findsOneWidget);
     });
   });
+
+  test('the kernel fact keeps the distribution clue and drops the builder', () {
+    expect(
+      kernelFact(
+        'Linux version 7.0.0-43-generic (buildd@lcy02-amd64-080) '
+        '(x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld '
+        '(GNU Binutils for Ubuntu) 2.46) #43-Ubuntu SMP PREEMPT\n',
+      ),
+      '7.0.0-43-generic (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) '
+      '15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46)',
+    );
+    expect(kernelFact('x' * 300).length, 160);
+  });
 }
