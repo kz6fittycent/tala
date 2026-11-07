@@ -1,3 +1,4 @@
+// Never takes screenshots: a real-camera check sends the user's picture here.
 const { chromium } = require('playwright');
 (async () => {
   const [token, seconds, who='bob'] = process.argv.slice(2);
@@ -12,7 +13,7 @@ const { chromium } = require('playwright');
   console.log('logged in'); await p.goto('http://127.0.0.1:8088/index.php/call/'+token); console.log('call page');
   const join = async () => {
     for (let i=0;i<45;i++) {
-      if (i==15) { console.log('buttons:', (await p.locator('button').allInnerTexts()).join('|').slice(0,500)); await p.screenshot({path:'/w/bob.png'}); }
+      if (i==15) { console.log('buttons:', (await p.locator('button').allInnerTexts()).join('|').slice(0,500)); }
       const dlg = p.locator('.media-settings button, [role=dialog] button').filter({hasText:/^\s*(Join call|Start call)\s*$/});
       if (await dlg.count()) { await dlg.first().click({timeout:3000}).catch(()=>{}); console.log('clicked in dialog'); return; }
       const top = p.locator('button').filter({hasText:/^\s*(Join call|Start call)\s*$/});
@@ -34,6 +35,5 @@ const { chromium } = require('playwright');
   });
   const end = Date.now()+seconds*1000;
   while (Date.now()<end) { await p.waitForTimeout(5000); console.log('web stats:', await stats()); }
-  await p.screenshot({path:'/w/bob.png'}).catch(()=>{});
   await b.close();
 })().catch(e => { console.error('FAIL', e.message.slice(0,300)); process.exit(1); });
