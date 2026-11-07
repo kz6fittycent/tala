@@ -508,6 +508,7 @@ class ConversationPane extends StatefulWidget {
     required this.drafts,
     required this.onBack,
     required this.onCall,
+    this.showHeader = true,
   });
 
   final ChatSource source;
@@ -517,6 +518,9 @@ class ConversationPane extends StatefulWidget {
   final Map<String, String> drafts;
   final VoidCallback onBack;
   final VoidCallback onCall;
+
+  /// Off inside a call, which already has the name and the controls.
+  final bool showHeader;
 
   @override
   State<ConversationPane> createState() => _ConversationPaneState();
@@ -716,6 +720,7 @@ class _ConversationPaneState extends State<ConversationPane> {
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.showHeader) ...[
           Padding(
             padding: const EdgeInsets.all(8),
             child: Row(
@@ -751,6 +756,7 @@ class _ConversationPaneState extends State<ConversationPane> {
             ),
           ),
           const Divider(height: 1),
+          ],
           if (_thread.problem != null) _Banner(_thread.problem!),
           Expanded(child: _body(context)),
           if (room.canChat && !_thread.gone) ...[
@@ -1160,10 +1166,12 @@ class _ImagePreview extends StatelessWidget {
         builder: (context, snap) {
           if (snap.hasError) return const SizedBox.shrink();
           final data = snap.data;
-          return SizedBox(
-            width: 360,
-            height: 240,
-            child: data == null
+          // Narrower than this only inside a call's side panel.
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: AspectRatio(
+              aspectRatio: 3 / 2,
+              child: data == null
                 ? const Center(child: CircularProgressIndicator())
                 : MouseRegion(
                     cursor: url != null
@@ -1182,6 +1190,7 @@ class _ImagePreview extends StatelessWidget {
                       ),
                     ),
                   ),
+            ),
           );
         },
       ),

@@ -23,9 +23,7 @@ void main() {
           child: SizedBox(
             width: 800,
             height: 400,
-            child: FillGrid(
-              children: [for (final k in keys) SizedBox(key: k)],
-            ),
+            child: FillGrid(children: [for (final k in keys) SizedBox(key: k)]),
           ),
         ),
       ),
@@ -54,5 +52,70 @@ void main() {
   testWidgets('no videos draws nothing and does not throw', (tester) async {
     expect(await layOut(tester, 0), isEmpty);
     expect(tester.takeException(), isNull);
+  });
+
+  group('call layout', () {
+    final others = GlobalKey();
+    final self = GlobalKey();
+    final controls = GlobalKey();
+    final chat = GlobalKey();
+
+    Future<void> show(
+      WidgetTester tester,
+      Size size, {
+      bool withChat = true,
+    }) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CallLayout(
+            others: SizedBox.expand(key: others),
+            self: SizedBox.expand(key: self),
+            controls: SizedBox(key: controls, height: 40),
+            chat: withChat ? SizedBox.expand(key: chat) : null,
+          ),
+        ),
+      );
+    }
+
+    Rect at(WidgetTester tester, GlobalKey key) =>
+        tester.getRect(find.byKey(key));
+
+    testWidgets('without chat, the other person fills everything', (
+      tester,
+    ) async {
+      await show(tester, const Size(1200, 800), withChat: false);
+      expect(at(tester, others), const Rect.fromLTWH(0, 0, 1200, 800));
+      expect(at(tester, self), const Rect.fromLTWH(944, 16, 240, 135));
+      expect(find.byKey(chat), findsNothing);
+    });
+
+    testWidgets('wide: own camera sits above chat, beside the video', (
+      tester,
+    ) async {
+      await show(tester, const Size(1200, 800));
+      expect(at(tester, others), const Rect.fromLTWH(0, 0, 860, 800));
+      final mine = at(tester, self);
+      expect(mine.left, 860);
+      expect(mine.top, 0);
+      expect(mine.width, 340);
+      final talk = at(tester, chat);
+      expect(talk.left, 860);
+      expect(talk.top, mine.bottom);
+      expect(talk.bottom, 800);
+      expect(at(tester, controls).center.dx, 430);
+    });
+
+    testWidgets('narrow: chat goes under the video', (tester) async {
+      await show(tester, const Size(600, 800));
+      final video = at(tester, others);
+      final talk = at(tester, chat);
+      expect(video.width, 600);
+      expect(talk.width, 600);
+      expect(talk.top, video.bottom);
+      expect(at(tester, self).width, 128);
+    });
   });
 }

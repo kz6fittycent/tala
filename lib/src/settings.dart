@@ -22,6 +22,7 @@ class AppSettings extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   Accent _accent = accents.first;
   bool _messageSound = true;
+  bool _callChatOpen = true;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -41,6 +42,10 @@ class AppSettings extends ChangeNotifier {
   bool get messageSound => _messageSound;
   set messageSound(bool value) => _change(() => _messageSound = value);
 
+  /// Whether a call shows the conversation's chat beside the video.
+  bool get callChatOpen => _callChatOpen;
+  set callChatOpen(bool value) => _change(() => _callChatOpen = value);
+
   void _change(VoidCallback apply) {
     apply();
     notifyListeners();
@@ -56,6 +61,7 @@ class AppSettings extends ChangeNotifier {
       _archivedOpen = d['archivedOpen'] == true;
       _accent = accentNamed(d['accent'] as String?);
       _messageSound = d['messageSound'] != false;
+      _callChatOpen = d['callChatOpen'] != false;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
@@ -79,6 +85,7 @@ class AppSettings extends ChangeNotifier {
         'theme': _themeMode.name,
         'accent': _accent.name,
         'messageSound': _messageSound,
+        'callChatOpen': _callChatOpen,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

@@ -62,9 +62,13 @@ class Call extends ChangeNotifier {
   /// The call in progress, so quitting from the tray can hang it up first.
   static Call? current;
 
-  Call(this.api, this.room);
+  Call(this.api, this.room, {this.answering = false});
   final NcApi api;
   final Room room;
+
+  /// Joining a call that's ringing here, so someone is already in it even if
+  /// the room list hasn't caught up.
+  final bool answering;
   final Signaling _sig = Signaling();
 
   late SignalingSettings _settings;
@@ -139,7 +143,9 @@ class Call extends ChangeNotifier {
       await api.joinCall(room.token, callFlags(audio: true, video: true));
       _joinedCall = true;
       // Nobody was in the call and nobody has arrived, so they're being rung.
-      if (!room.hasCall && !_otherArrived && !_ended) _ringback.start();
+      if (!room.hasCall && !answering && !_otherArrived && !_ended) {
+        _ringback.start();
+      }
       if (_subs.isEmpty) _state('In call, opening camera and mic');
 
       final local = await media;

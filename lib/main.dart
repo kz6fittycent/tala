@@ -474,6 +474,10 @@ class _RoomsPageState extends State<RoomsPage> {
   List<Room>? _rooms;
   Object? _roomsError;
   String? _selected;
+
+  /// The conversation in a call, if any, and whether its chat is showing.
+  String? _callToken;
+  bool _callChatOpen = false;
   Timer? _roomTimer;
   final Map<String, String> _drafts = {};
   List<FederationInvite> _invites = const [];
@@ -482,7 +486,13 @@ class _RoomsPageState extends State<RoomsPage> {
   final DesktopNotifier _notifier = DesktopNotifier();
   late final AppLifecycleListener _lifecycle;
   late final ChatAlerts _alerts = ChatAlerts(
-    isViewing: (token) => _focused && _selected == token,
+    isViewing: (token) {
+      if (!_focused) return false;
+      final inCall = _callToken;
+      return inCall == null
+          ? _selected == token
+          : _callChatOpen && inCall == token;
+    },
     show: (note) {
       _notifier.show(
         note.token,
@@ -824,18 +834,45 @@ class _RoomsPageState extends State<RoomsPage> {
     if (accepted == true) {
       final note = await _incoming.accept();
       if (note != null) {
-        await _openCall(Room(note.token, note.name, true, note.isOneToOne ? 1 : 2));
+        await _openCall(
+          Room(note.token, note.name, true, note.isOneToOne ? 1 : 2),
+          answering: true,
+        );
       }
     } else if (accepted == false) {
       await _incoming.decline();
     }
   }
 
-  Future<void> _openCall(Room room) async {
+  Room? _knownRoom(String token) =>
+      _rooms?.where((r) => r.token == token).firstOrNull;
+
+  /// A ring only carries a name and type, but chat needs to know who the user
+  /// is in the room, so use the full room whenever the server will give it.
+  Future<void> _openCall(Room room, {bool answering = false}) async {
     _incoming.suspended = true;
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => CallPage(api: widget.api, room: room)));
+    if (_knownRoom(room.token) == null) await _refreshRooms();
+    if (!mounted) return;
+    final full = _knownRoom(room.token) ?? room;
+    // The main chat comes off screen, so two panes never poll one conversation.
+    setState(() {
+      _callToken = room.token;
+      _callChatOpen = widget.settings.callChatOpen;
+    });
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CallPage(
+          api: widget.api,
+          room: full,
+          answering: answering,
+          settings: widget.settings,
+          drafts: _drafts,
+          onChatOpen: (open) => _callChatOpen = open,
+        ),
+      ),
+    );
     _incoming.suspended = false;
+    if (mounted) setState(() => _callToken = null);
   }
 
   @override
@@ -871,7 +908,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   onAccept: (i) => _answerInvite(i, true),
                   onDecline: (i) => _answerInvite(i, false),
                 ),
-          conversation: selected == null
+          conversation: selected == null || _callToken != null
               ? null
               : ConversationPane(
                   key: ValueKey(selected.token),
@@ -908,15 +945,44 @@ class IncomingCallDialog extends StatelessWidget {
 }
 
 class CallPage extends StatefulWidget {
-  const CallPage({super.key, required this.api, required this.room});
+  const CallPage({
+    super.key,
+    required this.api,
+    required this.room,
+    required this.answering,
+    required this.settings,
+    required this.drafts,
+    required this.onChatOpen,
+  });
   final NcApi api;
   final Room room;
+
+  /// Someone is already ringing, so the caller's tone isn't wanted.
+  final bool answering;
+  final AppSettings settings;
+  final Map<String, String> drafts;
+  final ValueChanged<bool> onChatOpen;
   @override
   State<CallPage> createState() => _CallPageState();
 }
 
 class _CallPageState extends State<CallPage> {
-  late final Call _call = Call(widget.api, widget.room)..start();
+  late final Call _call = Call(
+    widget.api,
+    widget.room,
+    answering: widget.answering,
+  )..start();
+
+  /// Keeps the chat, with its scroll and any reply in progress, when resizing
+  /// moves it between beside and under the video.
+  final GlobalKey _chatKey = GlobalKey();
+
+  void _toggleChat() {
+    final open = !widget.settings.callChatOpen;
+    widget.settings.callChatOpen = open;
+    widget.onChatOpen(open);
+    setState(() {});
+  }
 
   @override
   void dispose() {
@@ -930,9 +996,9 @@ class _CallPageState extends State<CallPage> {
         builder: (context, _) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(title: Text('${widget.room.name}: ${_call.state}')),
-          body: Stack(fit: StackFit.expand, children: [
+          body: CallLayout(
             // Cover crops to fill, whatever shape the other camera sends.
-            FillGrid(children: [
+            others: FillGrid(children: [
               for (final r in _call.remotes)
                 RTCVideoView(
                   r,
@@ -941,41 +1007,54 @@ class _CallPageState extends State<CallPage> {
                       RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                 ),
             ]),
-            Positioned(
-              right: 16,
-              top: 16,
-              width: 240,
-              height: 135,
-              child: RTCVideoView(
-                _call.localRenderer,
-                mirror: true,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              ),
+            self: RTCVideoView(
+              _call.localRenderer,
+              mirror: true,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 12,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton.filled(
-                      icon: Icon(_call.micOn ? Icons.mic : Icons.mic_off),
-                      onPressed: _call.toggleMic),
-                  const SizedBox(width: 12),
-                  IconButton.filled(
-                      icon: Icon(
-                          _call.camOn ? Icons.videocam : Icons.videocam_off),
-                      onPressed: _call.toggleCam),
-                  const SizedBox(width: 12),
-                  IconButton.filled(
-                      style: IconButton.styleFrom(backgroundColor: Colors.red),
-                      icon: const Icon(Icons.call_end),
-                      onPressed: () => Navigator.of(context).pop()),
-                ],
-              ),
+            chat: widget.settings.callChatOpen
+                ? ConversationPane(
+                    key: _chatKey,
+                    source: widget.api,
+                    room: widget.room,
+                    drafts: widget.drafts,
+                    showHeader: false,
+                    onBack: () {},
+                    onCall: () {},
+                  )
+                : null,
+            controls: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton.filled(
+                    tooltip: _call.micOn ? 'Mute' : 'Unmute',
+                    icon: Icon(_call.micOn ? Icons.mic : Icons.mic_off),
+                    onPressed: _call.toggleMic),
+                const SizedBox(width: 12),
+                IconButton.filled(
+                    tooltip:
+                        _call.camOn ? 'Turn camera off' : 'Turn camera on',
+                    icon: Icon(
+                        _call.camOn ? Icons.videocam : Icons.videocam_off),
+                    onPressed: _call.toggleCam),
+                const SizedBox(width: 12),
+                IconButton.filled(
+                    tooltip: widget.settings.callChatOpen
+                        ? 'Hide chat'
+                        : 'Show chat',
+                    icon: Icon(widget.settings.callChatOpen
+                        ? Icons.chat
+                        : Icons.chat_outlined),
+                    onPressed: _toggleChat),
+                const SizedBox(width: 12),
+                IconButton.filled(
+                    tooltip: 'Hang up',
+                    style: IconButton.styleFrom(backgroundColor: Colors.red),
+                    icon: const Icon(Icons.call_end),
+                    onPressed: () => Navigator.of(context).pop()),
+              ],
             ),
-          ]),
+          ),
         ),
       );
 }

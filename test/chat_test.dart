@@ -619,6 +619,50 @@ void main() {
           ),
         );
 
+    testWidgets('inside a call, chat fits a narrow panel with no header',
+        (tester) async {
+      final src = FakeSource()
+        ..history = (_) => [
+              msg(1),
+              for (var i = 2; i < 6; i++)
+                ChatMessage.fromJson({
+                  'id': i,
+                  'actorType': 'users',
+                  'actorId': 'pat',
+                  'actorDisplayName': 'A very long display name indeed, yes',
+                  'timestamp': 1700000000 + i,
+                  'message': 'https://example.com/${'long-link-' * 12} and '
+                      '${'words ' * 40}',
+                  'messageParameters': <String, dynamic>{},
+                  'systemMessage': '',
+                  'messageType': 'comment',
+                }),
+            ];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 340,
+              height: 400,
+              child: ConversationPane(
+                source: src,
+                room: room(),
+                drafts: {},
+                showHeader: false,
+                onBack: () {},
+                onCall: () {},
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.byTooltip('Start a call'), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('Enter sends and Shift+Enter does not', (tester) async {
       final src = FakeSource()..history = (_) => [msg(1)];
       await tester.pumpWidget(pane(src, room()));
@@ -1543,8 +1587,10 @@ void main() {
           ..archivedOpen = true
           ..themeMode = ThemeMode.dark
           ..accent = accentNamed('green')
-          ..messageSound = false;
+          ..messageSound = false
+          ..callChatOpen = false;
         final again = AppSettings(file: file);
+        expect(again.callChatOpen, isFalse);
         expect(again.hideArchived, isTrue);
         expect(again.archivedOpen, isTrue);
         expect(again.themeMode, ThemeMode.dark);
