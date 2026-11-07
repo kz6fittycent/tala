@@ -191,8 +191,10 @@ class _AppMenuState extends State<AppMenu> {
       case _MenuChoice.account:
         showDialog<void>(
           context: context,
-          builder: (_) =>
-              AccountDialog(creds: creds, onChangeAccount: widget.onChangeAccount),
+          builder: (_) => AccountDialog(
+            creds: creds,
+            onChangeAccount: widget.onChangeAccount,
+          ),
         );
       case _MenuChoice.appearance:
         showDialog<void>(
@@ -437,7 +439,7 @@ class AboutTala extends StatelessWidget {
           SizedBox(height: 12),
           Text(
             'Copyright © 2026 kz6fittycent. Free software under the GNU '
-            'Affero General Public License, version 3.',
+            'Affero General Public License, version 3 or any later version.',
             textAlign: TextAlign.center,
           ),
         ],

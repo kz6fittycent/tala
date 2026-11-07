@@ -24,7 +24,7 @@ description: |
 base: core24
 grade: stable
 confinement: strict
-license: AGPL-3.0-only
+license: AGPL-3.0-or-later
 icon: assets/icon/tala-512.png
 contact: https://github.com/kz6fittycent/tala/issues
 issues: https://github.com/kz6fittycent/tala/issues

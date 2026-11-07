@@ -4,7 +4,7 @@
 
 [![tala](https://snapcraft.io/tala/badge.svg)](https://snapcraft.io/tala)
 [![Snap Builds](https://github.com/kz6fittycent/tala/actions/workflows/snap-builds.yml/badge.svg)](https://github.com/kz6fittycent/tala/actions/workflows/snap-builds.yml)
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![License: AGPL v3 or later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 Chat, audio calls and video calls for Nextcloud Talk, as a native desktop app
 for Linux. Tala (Old Norse "to speak") is an independent project, not affiliated
@@ -101,4 +101,5 @@ Tala is free and stays free. A one-time or monthly tip on
 
 ## License
 
-GNU Affero General Public License, version 3. See `LICENSE`.
+GNU Affero General Public License, version 3 or (at your option) any later
+version (AGPL-3.0-or-later). See `LICENSE`.
