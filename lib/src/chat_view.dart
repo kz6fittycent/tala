@@ -49,6 +49,8 @@ class ChatLayout extends StatelessWidget {
     this.onNewConversation,
     this.onGuestLink,
     this.onDelete,
+    this.onMembers,
+    this.onRename,
   });
 
   final List<Room>? rooms;
@@ -65,6 +67,8 @@ class ChatLayout extends StatelessWidget {
   final VoidCallback? onNewConversation;
   final ValueChanged<Room>? onGuestLink;
   final ValueChanged<Room>? onDelete;
+  final ValueChanged<Room>? onMembers;
+  final ValueChanged<Room>? onRename;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -83,6 +87,8 @@ class ChatLayout extends StatelessWidget {
         onNewConversation: onNewConversation,
         onGuestLink: onGuestLink,
         onDelete: onDelete,
+        onMembers: onMembers,
+        onRename: onRename,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -118,6 +124,8 @@ class RoomList extends StatelessWidget {
     this.onNewConversation,
     this.onGuestLink,
     this.onDelete,
+    this.onMembers,
+    this.onRename,
   });
 
   final List<Room>? rooms;
@@ -133,6 +141,8 @@ class RoomList extends StatelessWidget {
   final VoidCallback? onNewConversation;
   final ValueChanged<Room>? onGuestLink;
   final ValueChanged<Room>? onDelete;
+  final ValueChanged<Room>? onMembers;
+  final ValueChanged<Room>? onRename;
 
   Widget _tile(Room room) => _RoomTile(
     room: room,
@@ -142,6 +152,8 @@ class RoomList extends StatelessWidget {
     onArchive: () => onArchive(room),
     onGuestLink: onGuestLink == null ? null : () => onGuestLink!(room),
     onDelete: onDelete == null ? null : () => onDelete!(room),
+    onMembers: onMembers == null ? null : () => onMembers!(room),
+    onRename: onRename == null ? null : () => onRename!(room),
   );
 
   @override
@@ -267,6 +279,8 @@ class _RoomTile extends StatelessWidget {
     required this.onArchive,
     this.onGuestLink,
     this.onDelete,
+    this.onMembers,
+    this.onRename,
   });
   final Room room;
   final bool selected;
@@ -275,9 +289,15 @@ class _RoomTile extends StatelessWidget {
   final VoidCallback onArchive;
   final VoidCallback? onGuestLink;
   final VoidCallback? onDelete;
+  final VoidCallback? onMembers;
+  final VoidCallback? onRename;
 
   Future<void> _menu(BuildContext context, Offset at) async {
     final choice = await _showMenuAt<String>(context, at, [
+      if (room.hasMembers && onMembers != null)
+        const PopupMenuItem(value: 'members', child: Text('Members…')),
+      if (room.canManage && onRename != null)
+        const PopupMenuItem(value: 'rename', child: Text('Rename…')),
       if (room.hasGuestLink && onGuestLink != null)
         const PopupMenuItem(value: 'link', child: Text('Guest link…')),
       if (room.canArchive)
@@ -300,6 +320,8 @@ class _RoomTile extends StatelessWidget {
           child: Text('Delete for everyone…'),
         ),
     ]);
+    if (choice == 'members') onMembers?.call();
+    if (choice == 'rename') onRename?.call();
     if (choice == 'remove') onRemove();
     if (choice == 'archive') onArchive();
     if (choice == 'link') onGuestLink?.call();
@@ -508,6 +530,7 @@ class ConversationPane extends StatefulWidget {
     required this.drafts,
     required this.onBack,
     required this.onCall,
+    this.onMembers,
     this.showHeader = true,
   });
 
@@ -518,6 +541,7 @@ class ConversationPane extends StatefulWidget {
   final Map<String, String> drafts;
   final VoidCallback onBack;
   final VoidCallback onCall;
+  final VoidCallback? onMembers;
 
   /// Off inside a call, which already has the name and the controls.
   final bool showHeader;
@@ -740,6 +764,12 @@ class _ConversationPaneState extends State<ConversationPane> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
+                if (room.hasMembers && widget.onMembers != null)
+                  IconButton(
+                    tooltip: 'Members',
+                    icon: const Icon(Icons.group_outlined),
+                    onPressed: widget.onMembers,
+                  ),
                 if (room.canCall)
                   room.hasCall
                       ? FilledButton.icon(

@@ -116,6 +116,14 @@ class Room {
   /// Guests need a password as well as the link.
   final bool hasPassword;
 
+  /// Conversations with a member list. One-to-ones always have the same two
+  /// people, and the others are system conversations.
+  bool get hasMembers => type == 2 || type == 3;
+
+  /// Moderators manage a local conversation. A federated one's members and
+  /// name belong to the server hosting it.
+  bool get canManage => hasMembers && isModerator && remoteServer.isEmpty;
+
   /// A link lets people join without an account. Federated conversations
   /// aren't this server's to share.
   bool get hasGuestLink => type == 3 && remoteServer.isEmpty;
@@ -145,6 +153,63 @@ class Person {
   final String id;
   final String name;
   final String detail;
+}
+
+/// Someone in a conversation, as the server lists them.
+class Member {
+  Member({
+    required this.attendeeId,
+    required this.actorType,
+    required this.actorId,
+    required this.name,
+    required this.participantType,
+  });
+
+  factory Member.fromJson(Map<String, dynamic> j) => Member(
+    attendeeId: j['attendeeId'] as int,
+    actorType: j['actorType'] as String? ?? '',
+    actorId: j['actorId'] as String? ?? '',
+    name: j['displayName'] as String? ?? '',
+    participantType: j['participantType'] as int? ?? 3,
+  );
+
+  final int attendeeId;
+
+  /// users, guests, emails, groups, circles or federated_users.
+  final String actorType;
+  final String actorId;
+  final String name;
+
+  /// 1 owner, 2 moderator, 3 user, 4 guest, 5 joined by link, 6 guest moderator.
+  final int participantType;
+
+  bool get isOwner => participantType == 1;
+  bool get isModerator => const {1, 2, 6}.contains(participantType);
+
+  /// A whole group or circle is listed as one entry, and has no single person
+  /// to promote.
+  bool get canBeModerator =>
+      !isOwner && const {'users', 'guests', 'emails'}.contains(actorType);
+
+  bool get isGuest => actorType == 'guests' || actorType == 'emails';
+
+  String get displayName => name.isNotEmpty
+      ? name
+      : isGuest
+      ? 'Guest'
+      : actorId;
+
+  String get role {
+    if (isOwner) return 'Owner';
+    if (isModerator) return 'Moderator';
+    return switch (actorType) {
+      'guests' || 'emails' => 'Guest',
+      'groups' => 'Group',
+      'circles' => 'Team',
+      'federated_users' => 'On another server',
+      _ => '',
+    };
+  }
 }
 
 /// An invitation to a conversation on another server.
@@ -360,6 +425,50 @@ class NcApi implements CallSource, ChatSource {
     );
     return (d as Map)['token'] as String;
   }
+
+  /// Creates a group with only the user in it. Members are added one at a time.
+  Future<String> createGroup(String name) async {
+    final d = await _ocs(
+      'POST',
+      '$_talkV4/room',
+      body: {'roomType': 2, 'roomName': name},
+    );
+    return (d as Map)['token'] as String;
+  }
+
+  Future<List<Member>> members(String token) async {
+    final data = await _ocs('GET', '$_talkV4/room/$token/participants');
+    return [
+      for (final m in data as List)
+        Member.fromJson((m as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  Future<void> addMember(String token, String userId) => _ocs(
+    'POST',
+    '$_talkV4/room/$token/participants',
+    body: {'newParticipant': userId, 'source': 'users'},
+  );
+
+  /// Takes the id in the address, as the web client does: this is a DELETE, and
+  /// a body on one isn't dependable.
+  Future<void> removeMember(String token, int attendeeId) =>
+      _ocs('DELETE', '$_talkV4/room/$token/attendees?attendeeId=$attendeeId');
+
+  Future<void> setModerator(String token, int attendeeId, bool moderator) =>
+      moderator
+      ? _ocs(
+          'POST',
+          '$_talkV4/room/$token/moderators',
+          body: {'attendeeId': attendeeId},
+        )
+      : _ocs(
+          'DELETE',
+          '$_talkV4/room/$token/moderators?attendeeId=$attendeeId',
+        );
+
+  Future<void> renameConversation(String token, String name) =>
+      _ocs('PUT', '$_talkV4/room/$token', body: {'roomName': name});
 
   /// Creates a conversation people can join by link, without an account.
   Future<String> createGuestConversation(String name, String password) async {

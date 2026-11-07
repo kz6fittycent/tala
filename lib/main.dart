@@ -26,6 +26,7 @@ import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
 import 'src/frame_log.dart';
+import 'src/groups.dart';
 import 'src/licenses.dart';
 import 'src/report.dart';
 import 'src/report_view.dart';
@@ -666,6 +667,7 @@ class _RoomsPageState extends State<RoomsPage> {
       builder: (_) => NewConversationDialog(
         search: widget.api.searchPeople,
         onInviteGuest: _newGuestConversation,
+        onNewGroup: _newGroup,
       ),
     );
     if (person == null) return;
@@ -679,6 +681,60 @@ class _RoomsPageState extends State<RoomsPage> {
         content: Text('Couldn\'t start a conversation with ${person.name}.'),
       ));
     }
+  }
+
+  Future<void> _newGroup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final group = await showDialog<NewGroup>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => NewGroupDialog(
+        search: widget.api.searchPeople,
+        create: widget.api.createGroup,
+        add: widget.api.addMember,
+      ),
+    );
+    if (group == null || !mounted) return;
+    await _refreshRooms();
+    if (!mounted) return;
+    _select(group.token);
+    if (group.notAdded.isNotEmpty) {
+      final names = group.notAdded.map((p) => p.name).join(', ');
+      messenger.showSnackBar(SnackBar(
+        content: Text('The group was created, but $names couldn\'t be added. '
+            'Try again from Members.'),
+      ));
+    }
+  }
+
+  Future<void> _showMembers(Room room) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => MembersDialog(
+        name: room.name,
+        selfId: room.selfId,
+        canManage: room.canManage,
+        load: () => widget.api.members(room.token),
+        search: widget.api.searchPeople,
+        add: (id) => widget.api.addMember(room.token, id),
+        remove: (id) => widget.api.removeMember(room.token, id),
+        setModerator: (id, on) =>
+            widget.api.setModerator(room.token, id, on),
+      ),
+    );
+    // Leaving moderation, for one, changes what this user can do in it.
+    if (mounted) await _refreshRooms();
+  }
+
+  Future<void> _renameRoom(Room room) async {
+    final renamed = await showDialog<bool>(
+      context: context,
+      builder: (_) => RenameDialog(
+        name: room.name,
+        rename: (name) => widget.api.renameConversation(room.token, name),
+      ),
+    );
+    if (renamed == true && mounted) await _refreshRooms();
   }
 
   Future<void> _newGuestConversation() async {
@@ -941,6 +997,8 @@ class _RoomsPageState extends State<RoomsPage> {
           onNewConversation: _newConversation,
           onGuestLink: _showGuestLink,
           onDelete: _deleteRoom,
+          onMembers: _showMembers,
+          onRename: _renameRoom,
           banner: _invites.isEmpty
               ? null
               : InviteBanners(
@@ -957,6 +1015,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   drafts: _drafts,
                   onBack: () => _select(null),
                   onCall: () => _openCall(selected!),
+                  onMembers: () => _showMembers(selected!),
                 ),
         ),
       ),

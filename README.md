@@ -22,6 +22,7 @@ The people and conversations in these pictures are made up.
 
 - Chat with replies, reactions, editing, deleting, file uploads and image previews
 - Audio and video calls, with ringing for incoming calls
+- Group conversations: create them, add and remove people, choose moderators, rename
 - Invite people with no account using a link or an email invitation (guests join
   in their browser)
 - Desktop notifications with a chime, and an unread count on the dock icon
@@ -65,8 +66,8 @@ for your microphone.
 | Theme and accent color | Starting a conversation |
 | ![Incoming call](docs/screenshots/incoming-call.png) | ![Report a problem](docs/screenshots/report.png) |
 | An incoming call | Reporting a problem |
-| ![Guest link](docs/screenshots/guest-link.png) | |
-| Inviting someone without an account | |
+| ![Guest link](docs/screenshots/guest-link.png) | ![New group](docs/screenshots/new-group.png) |
+| Inviting someone without an account | Creating a group |
 
 More in the [wiki](https://github.com/kz6fittycent/tala/wiki).
 

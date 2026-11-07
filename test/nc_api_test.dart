@@ -58,6 +58,22 @@ class Server {
         'parent': {'id': 5, 'message': 'new text'},
       });
       bodies.add(utf8.decode(body));
+    } else if (path.endsWith('/room/abc/participants') && q.method == 'GET') {
+      _ocs(r, [
+        {
+          'attendeeId': 7,
+          'actorType': 'users',
+          'actorId': 'sam',
+          'displayName': 'Sam',
+          'participantType': 2,
+        },
+        {'attendeeId': 8, 'actorType': 'guests', 'actorId': 'x', 'participantType': 4},
+      ]);
+    } else if ((path.endsWith('/room/abc') && q.method == 'PUT') ||
+        path.endsWith('/room/abc/attendees') ||
+        path.endsWith('/room/abc/moderators')) {
+      bodies.add(utf8.decode(body));
+      _ocs(r, {});
     } else if (q.method == 'MKCOL') {
       folders.add(path);
       r.statusCode = 201;
@@ -256,6 +272,39 @@ void main() {
   test('deleting for everyone removes the whole conversation', () async {
     await api.deleteConversation('abc');
     expect(s.requests.last, 'DELETE /ocs/v2.php/apps/spreed/api/v4/room/abc');
+  });
+
+  test('a group is created by name, and members are added as users', () async {
+    expect(await api.createGroup('Book club'), 'new-room');
+    expect(jsonDecode(s.bodies.last), {'roomType': 2, 'roomName': 'Book club'});
+    await api.addMember('abc', 'sam');
+    expect(s.requests.last,
+        'POST /ocs/v2.php/apps/spreed/api/v4/room/abc/participants');
+    expect(jsonDecode(s.bodies.last),
+        {'newParticipant': 'sam', 'source': 'users'});
+  });
+
+  test('members are read from the server\'s fields', () async {
+    final members = await api.members('abc');
+    expect(members.map((m) => m.attendeeId), [7, 8]);
+    expect(members.first.displayName, 'Sam');
+    expect(members.first.isModerator, isTrue);
+    expect(members.last.displayName, 'Guest');
+    expect(members.last.isGuest, isTrue);
+  });
+
+  test('removing, moderators and renaming use the right calls', () async {
+    const room = '/ocs/v2.php/apps/spreed/api/v4/room/abc';
+    await api.removeMember('abc', 7);
+    expect(s.requests.last, 'DELETE $room/attendees?attendeeId=7');
+    await api.setModerator('abc', 7, true);
+    expect(s.requests.last, 'POST $room/moderators');
+    expect(jsonDecode(s.bodies.last), {'attendeeId': 7});
+    await api.setModerator('abc', 7, false);
+    expect(s.requests.last, 'DELETE $room/moderators?attendeeId=7');
+    await api.renameConversation('abc', 'New name');
+    expect(s.requests.last, 'PUT $room');
+    expect(jsonDecode(s.bodies.last), {'roomName': 'New name'});
   });
 
   test('only a 401 counts as a rejected sign-in', () async {

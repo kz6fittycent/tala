@@ -18,6 +18,7 @@ import 'package:tala/main.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/chat.dart';
+import 'package:tala/src/groups.dart';
 import 'package:tala/src/chat_view.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
@@ -341,12 +342,84 @@ void main() {
               Person('marco', 'Marco Silva', ''),
             ],
             onInviteGuest: () {},
+            onNewGroup: () {},
           ),
         );
         await _settle(t);
         await t.enterText(find.byType(TextField).last, 'ma');
         await t.pump(const Duration(milliseconds: 400));
       },
+    );
+  });
+
+  testWidgets('new group', (t) {
+    return scene(
+      t,
+      'new-group',
+      _main(),
+      then: () async {
+        await dialog(
+          t,
+          NewGroupDialog(
+            search: (q) async => [
+              for (final p in [
+                Person('maya', 'Maya Chen', ''),
+                Person('marco', 'Marco Silva', ''),
+                Person('mina', 'Mina Okafor', ''),
+              ])
+                if (p.name.toLowerCase().contains(q)) p,
+            ],
+            create: (_) async => 'x',
+            add: (_, _) async {},
+          ),
+        );
+        await _settle(t);
+        await t.enterText(
+          find.widgetWithText(TextField, 'Group name'),
+          'Book club',
+        );
+        await t.enterText(find.byType(TextField).last, 'ma');
+        await t.pump(const Duration(milliseconds: 400));
+        await _settle(t);
+        await t.tap(find.widgetWithText(ListTile, 'Maya Chen').last);
+        await _settle(t);
+        await t.enterText(find.byType(TextField).last, 'mi');
+        await t.pump(const Duration(milliseconds: 400));
+      },
+    );
+  });
+
+  testWidgets('members', (t) {
+    Member member(int id, String name, int type) => Member(
+      attendeeId: id,
+      actorType: 'users',
+      actorId: name == 'Alex Rivera' ? 'alex' : name,
+      name: name,
+      participantType: type,
+    );
+    return scene(
+      t,
+      'members',
+      _main(),
+      then: () => dialog(
+        t,
+        MembersDialog(
+          name: 'Book club',
+          selfId: 'alex',
+          canManage: true,
+          load: () async => [
+            member(1, 'Alex Rivera', 1),
+            member(2, 'Maya Chen', 2),
+            member(3, 'Marco Silva', 3),
+            member(4, 'Mina Okafor', 3),
+            member(5, 'Sam Rivers', 3),
+          ],
+          search: (_) async => const [],
+          add: (_) async {},
+          remove: (_) async {},
+          setModerator: (_, _) async {},
+        ),
+      ),
     );
   });
 
