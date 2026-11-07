@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
-import 'package:flutter/services.dart';
 
 import 'src/account_store.dart';
 import 'src/app_colors.dart';
@@ -28,6 +26,7 @@ import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
 import 'src/frame_log.dart';
+import 'src/licenses.dart';
 import 'src/report.dart';
 import 'src/report_view.dart';
 import 'src/call_layout.dart';
@@ -36,12 +35,7 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   log('=== Tala $appVersion starting · ${reportPlatform()}');
   installCrashCapture();
-  LicenseRegistry.addLicense(() async* {
-    yield LicenseEntryWithLineBreaks(
-      const ['Tala'],
-      await rootBundle.loadString('LICENSE'),
-    );
-  });
+  registerLicenses();
   if (args.contains('--chat-check')) {
     final Credentials? creds;
     try {

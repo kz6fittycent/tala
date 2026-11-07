@@ -64,6 +64,7 @@ flutter:
     - assets/sounds/ringback.wav
     - assets/sounds/message.wav
     - assets/icon/tala-small-64.png
+    - assets/licenses/libwebrtc.txt
     - LICENSE
 
   # To add assets to your application, add an assets section, like this:

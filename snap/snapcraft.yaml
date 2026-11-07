@@ -10,8 +10,8 @@ description: |
   password in your system keyring, stays in the tray when you close the window,
   and shows desktop notifications for messages and calls.
 
-  Calls currently need a server with the High Performance Backend (external
-  signaling).
+  Calls work with or without Talk's High Performance Backend. Without it,
+  everyone connects directly, which suits small calls.
 
   After installing, connect the interfaces it needs:
 
