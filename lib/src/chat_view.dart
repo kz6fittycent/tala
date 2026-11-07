@@ -54,9 +54,11 @@ class ChatLayout extends StatelessWidget {
     this.onDelete,
     this.onMembers,
     this.onRename,
+    this.onSearch,
     this.avatars,
   });
 
+  final VoidCallback? onSearch;
   final AvatarStore? avatars;
   final List<Room>? rooms;
   final Object? roomsError;
@@ -94,6 +96,7 @@ class ChatLayout extends StatelessWidget {
         onDelete: onDelete,
         onMembers: onMembers,
         onRename: onRename,
+        onSearch: onSearch,
         avatars: avatars,
       );
       if (box.maxWidth < _twoPaneWidth) {
@@ -132,9 +135,11 @@ class RoomList extends StatelessWidget {
     this.onDelete,
     this.onMembers,
     this.onRename,
+    this.onSearch,
     this.avatars,
   });
 
+  final VoidCallback? onSearch;
   final AvatarStore? avatars;
   final List<Room>? rooms;
   final Object? error;
@@ -190,6 +195,12 @@ class RoomList extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
+              if (onSearch != null)
+                IconButton(
+                  tooltip: 'Search messages',
+                  icon: const Icon(Icons.search),
+                  onPressed: onSearch,
+                ),
               IconButton(
                 tooltip: 'Refresh',
                 icon: const Icon(Icons.refresh),
@@ -524,6 +535,7 @@ class ConversationPane extends StatefulWidget {
     required this.onBack,
     required this.onCall,
     this.onMembers,
+    this.onSearch,
     this.avatars,
     this.showHeader = true,
   });
@@ -536,6 +548,7 @@ class ConversationPane extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onCall;
   final VoidCallback? onMembers;
+  final VoidCallback? onSearch;
   final AvatarStore? avatars;
 
   /// Off inside a call, which already has the name and the controls.
@@ -863,6 +876,12 @@ class _ConversationPaneState extends State<ConversationPane> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
+                if (widget.onSearch != null)
+                  IconButton(
+                    tooltip: 'Search this conversation',
+                    icon: const Icon(Icons.search),
+                    onPressed: widget.onSearch,
+                  ),
                 if (room.hasMembers && widget.onMembers != null)
                   IconButton(
                     tooltip: 'Members',
@@ -1145,21 +1164,41 @@ class _Composer extends StatelessWidget {
   );
 }
 
+/// A full date with its year, for messages that may be years old.
+class FullDateDivider extends StatelessWidget {
+  const FullDateDivider(this.time, {super.key});
+  final DateTime time;
+
+  @override
+  Widget build(BuildContext context) =>
+      _Divider(MaterialLocalizations.of(context).formatFullDate(time));
+}
+
 class _Divider extends StatelessWidget {
   const _Divider(this.text);
   final String text;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    child: Row(
-      children: [
-        const Expanded(child: Divider()),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(text, style: Theme.of(context).textTheme.labelMedium),
-        ),
-        const Expanded(child: Divider()),
-      ],
+    // A long date wraps in a narrow window instead of overflowing.
+    child: LayoutBuilder(
+      builder: (context, box) => Row(
+        children: [
+          const Expanded(child: Divider()),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: box.maxWidth - 16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
+          ),
+          const Expanded(child: Divider()),
+        ],
+      ),
     ),
   );
 }
@@ -1215,6 +1254,48 @@ class _ComposerBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A message to read, not act on: only Copy text is offered.
+class ReadOnlyMessage extends StatelessWidget {
+  const ReadOnlyMessage({
+    super.key,
+    required this.message,
+    required this.own,
+    required this.preview,
+    this.avatars,
+  });
+  final ChatMessage message;
+  final bool own;
+  final Future<Uint8List> Function(int fileId) preview;
+  final AvatarStore? avatars;
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.isSystem) return _SystemRow(message);
+    return _MessageBubble(
+      message: message,
+      own: own,
+      showName: true,
+      avatar: Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: Avatar(
+          radius: _messageAvatarRadius,
+          name: message.actorName.isEmpty ? 'Guest' : message.actorName,
+          image: message.actorType == 'users'
+              ? avatars?.forUser(message.actorId)
+              : null,
+        ),
+      ),
+      canInteract: false,
+      onReply: () {},
+      onReact: (_) {},
+      onEdit: () {},
+      onDelete: () {},
+      canModerate: false,
+      preview: preview,
     );
   }
 }

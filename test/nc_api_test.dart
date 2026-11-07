@@ -51,6 +51,11 @@ class Server {
     } else if (path.contains('/shares')) {
       shares.add(jsonDecode(utf8.decode(body)) as Map<String, dynamic>);
       _ocs(r, {});
+    } else if (path.endsWith('/5/context')) {
+      _ocs(r, [
+        {'id': 4, 'message': 'before'},
+        {'id': 5, 'message': 'found'},
+      ]);
     } else if (path.contains('/chat/')) {
       _ocs(r, {
         'id': 9,
@@ -116,6 +121,26 @@ class Server {
       _ocs(r, {});
     } else if (path.contains('/reaction/')) {
       _ocs(r, {});
+    } else if (path.endsWith('/talk-message/search')) {
+      final full = q.uri.queryParameters['term'] == 'full';
+      _ocs(r, {
+        'entries': [
+          for (var i = 0; i < (full ? 20 : 1); i++)
+            {
+              'title': 'Sam in Family',
+              'subline': '**bold** words',
+              'attributes': {
+                'conversation': 'abc',
+                'messageId': '${i + 1}',
+                'actorType': 'users',
+                'actorId': 'sam',
+                'timestamp': '1700000000',
+              },
+            },
+          {'title': 'no attributes', 'attributes': []},
+        ],
+        'cursor': 7,
+      });
     } else if (path.startsWith('/index.php/avatar/custom')) {
       r.headers.set('X-NC-IsCustomAvatar', '1');
       r.headers.contentType = ContentType('image', 'png');
@@ -322,6 +347,47 @@ void main() {
     await api.renameConversation('abc', 'New name');
     expect(s.requests.last, 'PUT $room');
     expect(jsonDecode(s.bodies.last), {'roomName': 'New name'});
+  });
+
+  test('searching reads hits and skips entries it can\'t open', () async {
+    final page = await api.searchMessages('sam');
+    expect(page.hits, hasLength(1));
+    final hit = page.hits.single;
+    expect(hit.token, 'abc');
+    expect(hit.messageId, 1);
+    expect(hit.title, 'Sam in Family');
+    expect(hit.excerpt, 'bold words');
+    expect(hit.actorId, 'sam');
+    expect(hit.timestamp, 1700000000);
+    expect(page.cursor, 7);
+    expect(page.hasMore, isFalse);
+  });
+
+  test('a full page means there may be more', () async {
+    expect((await api.searchMessages('full')).hasMore, isTrue);
+  });
+
+  test('a search sends its term safely, with its scope and cursor', () async {
+    await api.searchMessages('a b&c', token: 'abc', cursor: 7);
+    final uri = Uri.parse(s.requests.last.substring('GET '.length));
+    expect(uri.path, '/ocs/v2.php/search/providers/talk-message/search');
+    expect(uri.queryParameters, {
+      'term': 'a b&c',
+      'limit': '20',
+      'conversation': 'abc',
+      'cursor': '7',
+    });
+    await api.searchMessages('x');
+    expect(
+      Uri.parse(s.requests.last.substring('GET '.length)).queryParameters.keys,
+      unorderedEquals(['term', 'limit']),
+    );
+  });
+
+  test('a message\'s neighbors are read from its context address', () async {
+    final got = await api.chatContext('abc', 5);
+    expect(got.map((m) => m.id), [4, 5]);
+    expect(s.requests.last, contains('/chat/abc/5/context?limit=15'));
   });
 
   test('only a picture someone chose counts as a user avatar', () async {

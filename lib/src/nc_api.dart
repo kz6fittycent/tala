@@ -10,6 +10,7 @@ import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 import 'mentions.dart';
+import 'search.dart';
 
 /// Also the device name the server lists for Tala's app password.
 const _userAgent = 'Tala/$appVersion';
@@ -668,6 +669,45 @@ class NcApi implements CallSource, ChatSource {
     return [
       for (final o in d as List)
         MentionOption.fromJson((o as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  /// Uses the server's own search, so it only covers what the user can read.
+  Future<SearchPage> searchMessages(
+    String term, {
+    String? token,
+    Object? cursor,
+  }) async {
+    final query = Uri(
+      queryParameters: {
+        'term': term,
+        'limit': '$searchPageSize',
+        'conversation': ?token,
+        if (cursor != null) 'cursor': '$cursor',
+      },
+    ).query;
+    final d = await _ocs(
+      'GET',
+      '/ocs/v2.php/search/providers/talk-message/search?$query',
+    );
+    final entries = (d as Map)['entries'] as List? ?? const [];
+    return SearchPage(
+      [
+        for (final e in entries)
+          ?SearchHit.fromJson((e as Map).cast<String, dynamic>()),
+      ],
+      d['cursor'],
+      // The server sends a cursor even when there's nothing left after it.
+      entries.length >= searchPageSize,
+    );
+  }
+
+  /// The messages either side of one, however old. Moves no read marker.
+  Future<List<ChatMessage>> chatContext(String token, int messageId) async {
+    final d = await _ocs('GET', '$_chatV1/$token/$messageId/context?limit=15');
+    return [
+      for (final m in d as List)
+        ChatMessage.fromJson((m as Map).cast<String, dynamic>()),
     ];
   }
 

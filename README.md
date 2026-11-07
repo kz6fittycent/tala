@@ -20,7 +20,7 @@ The people and conversations in these pictures are made up.
 
 ## Features
 
-- Chat with replies, reactions, @ mentions, avatars, Markdown, editing, deleting, file uploads and image previews
+- Chat with replies, reactions, @ mentions, avatars, Markdown, message search, editing, deleting, file uploads and image previews
 - Audio and video calls, with ringing for incoming calls
 - Group conversations: create them, add and remove people, choose moderators, rename
 - Invite people with no account using a link or an email invitation (guests join

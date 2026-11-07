@@ -20,6 +20,7 @@ import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/groups.dart';
 import 'package:tala/src/mentions.dart';
+import 'package:tala/src/search.dart';
 import 'package:tala/src/chat_view.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
@@ -218,12 +219,14 @@ Widget _main() {
         onChangeAccount: (_) {},
       ),
       onNewConversation: () {},
+      onSearch: () {},
       conversation: ConversationPane(
         source: _DemoSource(),
         room: _hike,
         drafts: {},
         onBack: () {},
         onCall: () {},
+        onSearch: () {},
       ),
     ),
   );
@@ -404,7 +407,9 @@ void main() {
           onRemove: (_) {},
           onArchive: (_) {},
           settings: settings,
+          onSearch: () {},
           conversation: ConversationPane(
+            onSearch: () {},
             source: _DemoSource()..only = [
               ChatMessage.fromJson({
                 'id': 1,
@@ -431,6 +436,79 @@ void main() {
           ),
         ),
       ),
+    );
+  });
+
+  testWidgets('search', (t) {
+    SearchHit hit(int id, String who, String where, String text, int days) =>
+        SearchHit(
+          token: 'x',
+          messageId: id,
+          title: '$who in $where',
+          excerpt: text,
+          actorType: 'guests',
+          actorId: who,
+          timestamp:
+              DateTime.now()
+                  .subtract(Duration(days: days))
+                  .millisecondsSinceEpoch ~/
+              1000,
+        );
+    return scene(
+      t,
+      'search',
+      _main(),
+      then: () async {
+        await dialog(
+          t,
+          SearchDialog(
+            search: (_, {token, cursor}) async => SearchPage([
+              hit(1, 'Maya Chen', 'Weekend hike', 'The trailhead moved to the north gate.', 1),
+              hit(2, 'Marco Silva', 'Book club', 'I can drive us to the trailhead on Sunday if that helps.', 9),
+              hit(3, 'Jordan Lee', 'Jordan Lee', 'Is the trailhead parking free?', 30),
+            ], null, false),
+            context: (_, _) async => const [],
+            preview: (_) async => Uint8List(0),
+            selfId: 'me',
+          ),
+        );
+        await _settle(t);
+        await t.enterText(find.byType(TextField).last, 'trailhead');
+        await t.pump(const Duration(milliseconds: 500));
+      },
+    );
+  });
+
+  testWidgets('search context', (t) {
+    return scene(
+      t,
+      'search-context',
+      _main(),
+      then: () async {
+        await dialog(
+          t,
+          MessageContextDialog(
+            hit: SearchHit(
+              token: 'x',
+              messageId: 2,
+              title: 'Maya Chen in Weekend hike',
+              excerpt: '',
+              actorType: 'users',
+              actorId: 'maya',
+              timestamp: _now,
+            ),
+            load: (_, _) async => [
+              _message(1, 'marco', 'Marco Silva', 'Are we still meeting at the usual spot?', 60),
+              _message(2, 'maya', 'Maya Chen', 'The trailhead moved to the north gate.', 58),
+              _message(3, 'me', 'You', 'Good to know, thanks. Is there parking?', 55),
+              _message(4, 'maya', 'Maya Chen', 'Plenty, and it is free before ten.', 50),
+            ],
+            preview: (_) async => Uint8List(0),
+            selfId: 'me',
+          ),
+        );
+        await _settle(t);
+      },
     );
   });
 

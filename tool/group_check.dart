@@ -93,6 +93,31 @@ void main() {
     final created = history.firstWhere((m) => m.isSystem);
     expect(created.blocks, isNull, reason: 'system messages aren\'t formatted');
 
+    // Search: finds it, cleans the excerpt, respects scope and membership.
+    await alice.chatSend(token, '**findme** @"bob" here', 'group-check-search');
+    final other = await alice.createGroup('Private check');
+    await alice.chatSend(other, 'findme privately', 'group-check-private');
+    final everywhere = await alice.searchMessages('findme');
+    expect(everywhere.hits.map((h) => h.token).toSet(), {token, other});
+    final inGroup = everywhere.hits.firstWhere((h) => h.token == token);
+    stdout.writeln('search excerpt: "${inGroup.excerpt}", title "${inGroup.title}"');
+    expect(inGroup.excerpt, isNot(contains('**')));
+    final scoped = await alice.searchMessages('findme', token: token);
+    expect(scoped.hits.map((h) => h.token).toSet(), {token});
+    final asBob = await bob.searchMessages('findme');
+    expect(asBob.hits.map((h) => h.token).toSet(), {token});
+    final around = await alice.chatContext(token, inGroup.messageId);
+    expect(around.map((m) => m.id), contains(inGroup.messageId));
+    expect(around.length, greaterThan(1));
+    final unread = (await bob.rooms()).firstWhere((r) => r.token == token).unread;
+    await bob.chatContext(token, inGroup.messageId);
+    expect(
+      (await bob.rooms()).firstWhere((r) => r.token == token).unread,
+      unread,
+      reason: 'looking at context must not mark anything read',
+    );
+    await alice.deleteConversation(other);
+
     // Set up by hand on the container: bob has a chosen picture, alice doesn't.
     if (env['TALA_GROUP_CHECK_BOB_HAS_AVATAR'] == '1') {
       expect(await alice.userAvatar('bob'), isNotNull);

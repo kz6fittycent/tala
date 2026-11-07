@@ -30,6 +30,7 @@ import 'src/groups.dart';
 import 'src/licenses.dart';
 import 'src/report.dart';
 import 'src/report_view.dart';
+import 'src/search.dart';
 import 'src/call_layout.dart';
 
 Future<void> main(List<String> args) async {
@@ -738,6 +739,22 @@ class _RoomsPageState extends State<RoomsPage> {
     if (renamed == true && mounted) await _refreshRooms();
   }
 
+  Future<void> _search({Room? room}) async {
+    final token = await showDialog<String>(
+      context: context,
+      builder: (_) => SearchDialog(
+        search: widget.api.searchMessages,
+        context: widget.api.chatContext,
+        preview: widget.api.chatPreview,
+        selfId: room?.selfId ?? _rooms?.firstOrNull?.selfId ?? '',
+        conversation: room?.token,
+        conversationName: room?.name,
+        avatars: widget.api.avatars,
+      ),
+    );
+    if (token != null && mounted) _select(token);
+  }
+
   Future<void> _newGuestConversation() async {
     final token = await showDialog<String>(
       context: context,
@@ -1000,6 +1017,7 @@ class _RoomsPageState extends State<RoomsPage> {
           onDelete: _deleteRoom,
           onMembers: _showMembers,
           onRename: _renameRoom,
+          onSearch: _search,
           avatars: widget.api.avatars,
           banner: _invites.isEmpty
               ? null
@@ -1018,6 +1036,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   onBack: () => _select(null),
                   onCall: () => _openCall(selected!),
                   onMembers: () => _showMembers(selected!),
+                  onSearch: () => _search(room: selected),
                   avatars: widget.api.avatars,
                 ),
         ),
