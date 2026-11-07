@@ -52,3 +52,6 @@ app.*.map.json
 /third_party/flutter_webrtc/third_party/downloads/
 /third_party/flutter_webrtc/third_party/libwebrtc/
 /assets/sounds/samples/
+
+# Cloudflare Worker local state
+.wrangler/

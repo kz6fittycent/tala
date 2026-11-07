@@ -733,19 +733,7 @@ class _RoomsPageState extends State<RoomsPage> {
     final accepted = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(ring.name),
-        content: const Text('Incoming call'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Decline')),
-          FilledButton.icon(
-              icon: const Icon(Icons.call),
-              onPressed: () => Navigator.of(context).pop(true),
-              label: const Text('Accept')),
-        ],
-      ),
+      builder: (_) => IncomingCallDialog(name: ring.name),
     );
     _dialogOpen = false;
     await _ringer.stop();
@@ -811,6 +799,26 @@ class _RoomsPageState extends State<RoomsPage> {
       ),
     );
   }
+}
+
+class IncomingCallDialog extends StatelessWidget {
+  const IncomingCallDialog({super.key, required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(name),
+        content: const Text('Incoming call'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Decline')),
+          FilledButton.icon(
+              icon: const Icon(Icons.call),
+              onPressed: () => Navigator.of(context).pop(true),
+              label: const Text('Accept')),
+        ],
+      );
 }
 
 class CallPage extends StatefulWidget {
