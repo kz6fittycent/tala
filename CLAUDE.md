@@ -92,6 +92,16 @@ Checked: `tool/group_check.dart` with `TALA_GROUP_CHECK_BOB_HAS_AVATAR=1` after 
 Links only open http and https, through `safeUrl`, and an unsafe one stays as typed. A label can differ from its address, as on the web. `snake_case`, `2 * 3 * 4`, and underscores or asterisks in bare addresses stay untouched; placeholders like `{mention-user1}` are atomic. A delimiter with no closer is remembered so hostile messages don't go quadratic; a test covers them.
 Checked: `tool/group_check.dart` on Nextcloud 35.0.2 and Talk 25.0.7. `tool/make_screenshots.dart` loads DejaVu Sans Mono as `monospace`, because tests have no system fonts.
 
+## Screen share prototype (2026-11-07, nothing in the app yet)
+A throwaway Flutter app in the scratchpad, using `third_party/flutter_webrtc`, ran on skyfire (Wayland, GNOME, unconfined, not in a snap) with the user picking in the portal. libwebrtc m150 has the portal and PipeWire capture built in (loads `libpipewire-0.3` at runtime).
+- Whole screen works: start, stop and start again were clean, with no sign of the upstream crash reports (#1542, #1703, both 2024 versions). About 15 fps, worst UI stall 328ms. Looped back in the app, it starts at 480x270 and reaches 1920x1080 after about 40s; `setParameters` with maintain-resolution returned false.
+- The first capture opens two portal sessions, so two pickers (the second capture opens one). The journal and portal Response signals both showed it, with or without `getSources` first. Needs a plugin patch.
+- Cancel is safe: both pickers answered 1 (cancelled), zero frames in 30s. But `getDisplayMedia` returns a track at once, before any choice, and the plugin's `OnError`/`OnStop` send nothing to Dart, so Tala can't tell a cancel or a stop from waiting. Needs a plugin patch, or watching `framesEncoded`.
+- Window sharing: `getSources(types: [Window])` ended the process with nothing logged, right after the user cancelled two pickers. Treat it as a crash; offer whole screen only. A still screen keeps sending about 15 fps.
+- The user saw no GNOME top bar indicator while sharing, so Tala must show its own "sharing your screen" banner with Stop.
+- Receiving: `call.dart` ignores offers with `roomType` `screen` (`subscriber: ignoring`), so Tala doesn't show other people's shares. Independent of capture.
+- Not tested: inside the snap (portal through the `desktop` plug, the gnome extension's libpipewire), a real call.
+
 ## Message search (built 2026-11-07, released in 0.5.0, the user confirmed it works)
 `lib/src/search.dart`. `SearchDialog` opens from a button by Refresh (all conversations) and one in a conversation's header (that conversation, via `conversation=`). It uses unified search, `/ocs/v2.php/search/providers/talk-message/search`, with a 400ms pause and latest-wins. "Show more" appears only after a full page of 20, because the server sends a cursor even with nothing left.
 A result opens `MessageContextDialog`: up to 15 messages each side from `chat/{token}/{id}/context`, with the hit highlighted and full dates with the year. Open conversation just selects the conversation at its latest messages. This panel instead of a true jump is my choice, flagged to the user: scrolling the live chat back could mean loading thousands of messages.
