@@ -27,6 +27,7 @@ import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
 import 'src/frame_log.dart';
+import 'src/call_layout.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -767,42 +768,52 @@ class _CallPageState extends State<CallPage> {
         builder: (context, _) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(title: Text('${widget.room.name}: ${_call.state}')),
-          body: Stack(children: [
-            GridView.extent(
-              maxCrossAxisExtent: 900,
-              childAspectRatio: 16 / 9,
-              children: [
-                for (final r in _call.remotes)
-                  RTCVideoView(r,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitContain),
-              ],
-            ),
+          body: Stack(fit: StackFit.expand, children: [
+            // Cover crops to fill, whatever shape the other camera sends.
+            FillGrid(children: [
+              for (final r in _call.remotes)
+                RTCVideoView(
+                  r,
+                  key: ObjectKey(r),
+                  objectFit:
+                      RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                ),
+            ]),
             Positioned(
               right: 16,
               top: 16,
               width: 240,
               height: 135,
-              child: RTCVideoView(_call.localRenderer, mirror: true),
+              child: RTCVideoView(
+                _call.localRenderer,
+                mirror: true,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton.filled(
+                      icon: Icon(_call.micOn ? Icons.mic : Icons.mic_off),
+                      onPressed: _call.toggleMic),
+                  const SizedBox(width: 12),
+                  IconButton.filled(
+                      icon: Icon(
+                          _call.camOn ? Icons.videocam : Icons.videocam_off),
+                      onPressed: _call.toggleCam),
+                  const SizedBox(width: 12),
+                  IconButton.filled(
+                      style: IconButton.styleFrom(backgroundColor: Colors.red),
+                      icon: const Icon(Icons.call_end),
+                      onPressed: () => Navigator.of(context).pop()),
+                ],
+              ),
             ),
           ]),
-          bottomNavigationBar: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              IconButton.filled(
-                  icon: Icon(_call.micOn ? Icons.mic : Icons.mic_off),
-                  onPressed: _call.toggleMic),
-              const SizedBox(width: 12),
-              IconButton.filled(
-                  icon: Icon(_call.camOn ? Icons.videocam : Icons.videocam_off),
-                  onPressed: _call.toggleCam),
-              const SizedBox(width: 12),
-              IconButton.filled(
-                  style: IconButton.styleFrom(backgroundColor: Colors.red),
-                  icon: const Icon(Icons.call_end),
-                  onPressed: () => Navigator.of(context).pop()),
-            ]),
-          ),
         ),
       );
 }
