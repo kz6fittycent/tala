@@ -79,7 +79,8 @@ class Server {
         {'id': 'staff', 'label': 'Staff', 'source': 'groups'},
       ]);
     } else if (path.endsWith('/room/abc/participants') ||
-        path.endsWith('/room/abc/public')) {
+        path.endsWith('/room/abc/public') ||
+        path.endsWith('/room/abc')) {
       bodies.add(utf8.decode(body));
       _ocs(r, {});
     } else if (path.endsWith('/spreed/api/v4/room') && q.method == 'POST') {
@@ -250,6 +251,11 @@ void main() {
         {'newParticipant': 'pat@example.com', 'source': 'emails'});
     await api.turnOffGuestLink('abc');
     expect(s.requests.last, 'DELETE /ocs/v2.php/apps/spreed/api/v4/room/abc/public');
+  });
+
+  test('deleting for everyone removes the whole conversation', () async {
+    await api.deleteConversation('abc');
+    expect(s.requests.last, 'DELETE /ocs/v2.php/apps/spreed/api/v4/room/abc');
   });
 
   test('only a 401 counts as a rejected sign-in', () async {

@@ -715,6 +715,24 @@ class _RoomsPageState extends State<RoomsPage> {
     ));
   }
 
+  Future<void> _deleteRoom(Room room) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (!await confirmDeleteForEveryone(context, room.name)) return;
+    try {
+      await widget.api.deleteConversation(room.token);
+    } catch (e) {
+      log('rooms: deleting failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Couldn\'t delete that conversation.')),
+      );
+      return;
+    }
+    _drafts.remove(room.token);
+    if (!mounted) return;
+    if (_selected == room.token) setState(() => _selected = null);
+    await _refreshRooms();
+  }
+
   Future<void> _removeRoom(Room room) async {
     final messenger = ScaffoldMessenger.of(context);
     final confirmed = await showDialog<bool>(
@@ -845,6 +863,7 @@ class _RoomsPageState extends State<RoomsPage> {
           ),
           onNewConversation: _newConversation,
           onGuestLink: _showGuestLink,
+          onDelete: _deleteRoom,
           banner: _invites.isEmpty
               ? null
               : InviteBanners(

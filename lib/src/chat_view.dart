@@ -48,6 +48,7 @@ class ChatLayout extends StatelessWidget {
     this.banner,
     this.onNewConversation,
     this.onGuestLink,
+    this.onDelete,
   });
 
   final List<Room>? rooms;
@@ -63,6 +64,7 @@ class ChatLayout extends StatelessWidget {
   final Widget? banner;
   final VoidCallback? onNewConversation;
   final ValueChanged<Room>? onGuestLink;
+  final ValueChanged<Room>? onDelete;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -80,6 +82,7 @@ class ChatLayout extends StatelessWidget {
         banner: banner,
         onNewConversation: onNewConversation,
         onGuestLink: onGuestLink,
+        onDelete: onDelete,
       );
       if (box.maxWidth < _twoPaneWidth) {
         return conversation ?? list;
@@ -114,6 +117,7 @@ class RoomList extends StatelessWidget {
     this.banner,
     this.onNewConversation,
     this.onGuestLink,
+    this.onDelete,
   });
 
   final List<Room>? rooms;
@@ -128,6 +132,7 @@ class RoomList extends StatelessWidget {
   final Widget? banner;
   final VoidCallback? onNewConversation;
   final ValueChanged<Room>? onGuestLink;
+  final ValueChanged<Room>? onDelete;
 
   Widget _tile(Room room) => _RoomTile(
     room: room,
@@ -136,6 +141,7 @@ class RoomList extends StatelessWidget {
     onRemove: () => onRemove(room),
     onArchive: () => onArchive(room),
     onGuestLink: onGuestLink == null ? null : () => onGuestLink!(room),
+    onDelete: onDelete == null ? null : () => onDelete!(room),
   );
 
   @override
@@ -260,6 +266,7 @@ class _RoomTile extends StatelessWidget {
     required this.onRemove,
     required this.onArchive,
     this.onGuestLink,
+    this.onDelete,
   });
   final Room room;
   final bool selected;
@@ -267,6 +274,7 @@ class _RoomTile extends StatelessWidget {
   final VoidCallback onRemove;
   final VoidCallback onArchive;
   final VoidCallback? onGuestLink;
+  final VoidCallback? onDelete;
 
   Future<void> _menu(BuildContext context, Offset at) async {
     final choice = await _showMenuAt<String>(context, at, [
@@ -286,10 +294,16 @@ class _RoomTile extends StatelessWidget {
               : 'Remove chat (you\'re the only moderator)',
         ),
       ),
+      if (room.offersDelete && onDelete != null)
+        const PopupMenuItem(
+          value: 'delete',
+          child: Text('Delete for everyone…'),
+        ),
     ]);
     if (choice == 'remove') onRemove();
     if (choice == 'archive') onArchive();
     if (choice == 'link') onGuestLink?.call();
+    if (choice == 'delete') onDelete?.call();
   }
 
   String get _preview {

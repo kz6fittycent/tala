@@ -39,6 +39,79 @@ void main() {
     expect(_room({'hasPassword': true}).hasPassword, isTrue);
   });
 
+  test(
+    'delete is offered only where the server allows it and it\'s needed',
+    () {
+      Room r(
+        int type, {
+        bool can = true,
+        bool leave = true,
+        String remote = '',
+      }) => Room.fromJson({
+        'token': 't',
+        'displayName': 'n',
+        'type': type,
+        'canDeleteConversation': can,
+        'canLeaveConversation': leave,
+        'remoteServer': remote,
+      });
+      expect(r(3).offersDelete, isTrue);
+      expect(
+        r(2, leave: false).offersDelete,
+        isTrue,
+        reason: 'link turned off',
+      );
+      expect(r(2).offersDelete, isFalse, reason: 'can leave, so leave');
+      expect(r(3, can: false).offersDelete, isFalse);
+      expect(r(1, leave: false).offersDelete, isFalse);
+      expect(r(6, leave: false).offersDelete, isFalse);
+      expect(r(3, remote: 'https://x').offersDelete, isFalse);
+    },
+  );
+
+  group('deleting', () {
+    Future<void> open(WidgetTester tester, void Function(bool) done) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async =>
+                    done(await confirmDeleteForEveryone(context, 'Picnic')),
+                child: const Text('go'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('go'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('cancelling or dismissing doesn\'t confirm', (tester) async {
+      bool? answer;
+      await open(tester, (a) => answer = a);
+      expect(find.text('Delete Picnic for everyone?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(answer, isFalse);
+      answer = null;
+      await tester.tap(find.text('go'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(answer, isFalse);
+    });
+
+    testWidgets('only the delete button confirms', (tester) async {
+      bool? answer;
+      await open(tester, (a) => answer = a);
+      await tester.tap(find.text('Delete for everyone'));
+      await tester.pumpAndSettle();
+      expect(answer, isTrue);
+    });
+  });
+
   group('creating', () {
     Future<void> open(
       WidgetTester tester,

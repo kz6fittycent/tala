@@ -44,6 +44,7 @@ class Room {
     this.muted = false,
     this.remoteServer = '',
     this.hasPassword = false,
+    this.canDelete = false,
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -83,6 +84,7 @@ class Room {
       muted: r['notificationLevel'] == 3,
       remoteServer: r['remoteServer'] as String? ?? '',
       hasPassword: r['hasPassword'] == true,
+      canDelete: r['canDeleteConversation'] == true,
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -117,6 +119,17 @@ class Room {
   /// A link lets people join without an account. Federated conversations
   /// aren't this server's to share.
   bool get hasGuestLink => type == 3 && remoteServer.isEmpty;
+
+  /// The server's own answer on whether this user may delete it for everyone.
+  final bool canDelete;
+
+  /// Guest conversations, and groups the user can't otherwise leave, such as
+  /// a guest conversation whose link was turned off. Other groups only offer
+  /// leaving, so nobody deletes a shared conversation by accident.
+  bool get offersDelete =>
+      canDelete &&
+      remoteServer.isEmpty &&
+      (type == 3 || (type == 2 && !canLeave));
   bool get isFederated => remoteServer.isNotEmpty;
 }
 
@@ -372,6 +385,10 @@ class NcApi implements CallSource, ChatSource {
   /// The link stops working and guests lose access. Members stay.
   Future<void> turnOffGuestLink(String token) =>
       _ocs('DELETE', '$_talkV4/room/$token/public');
+
+  /// Gone for every participant, guests included, with its messages.
+  Future<void> deleteConversation(String token) =>
+      _ocs('DELETE', '$_talkV4/room/$token');
 
   /// Whether the server has stopped accepting this app password, as opposed to
   /// one request being refused or the network being down.

@@ -13,6 +13,39 @@ String guestLink(String server, String token) {
   return '$base/index.php/call/$token';
 }
 
+/// Deleting can't be undone and affects everyone, so it always asks first.
+Future<bool> confirmDeleteForEveryone(BuildContext context, String name) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) {
+      final scheme = Theme.of(context).colorScheme;
+      return AlertDialog(
+        title: Text('Delete $name for everyone?'),
+        content: const Text(
+          'Everyone in it, including guests, loses the conversation and all '
+          'its messages, and any guest link stops working. This can\'t be '
+          'undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: scheme.error,
+              foregroundColor: scheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete for everyone'),
+          ),
+        ],
+      );
+    },
+  );
+  return confirmed == true;
+}
+
 /// Names a new conversation that people can join without an account. Stays
 /// open if the server refuses, and closes with the new conversation's token.
 class NewGuestConversationDialog extends StatefulWidget {

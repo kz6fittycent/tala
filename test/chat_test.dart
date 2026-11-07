@@ -867,6 +867,38 @@ void main() {
       expect(removed, isNull);
     });
 
+    testWidgets('delete for everyone is on the menu when offered',
+        (tester) async {
+      wide(tester);
+      Room? deleted;
+      Widget app(Room r) => MaterialApp(
+            home: Scaffold(
+              body: ChatLayout(
+                rooms: [r],
+                roomsError: null,
+                selected: null,
+                onSelect: (_) {},
+                onRefresh: () {},
+                onRemove: (_) {},
+                onArchive: (_) {},
+                onDelete: (r) => deleted = r,
+                settings: tempPrefs(),
+                conversation: null,
+              ),
+            ),
+          );
+      await tester.pumpWidget(app(Room('t', 'Family', false, 2)));
+      await openMenu(tester, 'Family');
+      expect(find.text('Delete for everyone…'), findsNothing);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(app(Room('t', 'Picnic', false, 3, canDelete: true)));
+      await openMenu(tester, 'Picnic');
+      await tester.tap(find.text('Delete for everyone…'));
+      await tester.pumpAndSettle();
+      expect(deleted?.token, 't');
+    });
+
     testWidgets('no composer when chat is not allowed', (tester) async {
       final src = FakeSource()..history = (_) => [msg(1)];
       await tester.pumpWidget(pane(src, room(canChat: false)));
