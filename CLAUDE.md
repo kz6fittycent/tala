@@ -55,12 +55,13 @@ Still open: no two-way call yet. Recipients don't ring: Tala joins with the same
 ## Milestone (2026-11-04)
 Two-way audio and video confirmed by the user, Tala to a browser on the same server (external signaling). The silent browser ring was on the other side (no audible ring from the official iPhone app either). Tala has no incoming-call handling yet: next major item.
 
-## Where we left off (2026-11-06)
-Fresh-session test: the user confirmed a message popup while Tala was hidden in the tray. The process list showed it running as `tala --background` after login, so the autostart entry fired. Not yet confirmed by the user: no window appeared at login. If it fails, check `~/.config/tala/log.txt` and `~/.config/autostart/io.github.kz6fittycent.tala.desktop`.
-Waiting on a second tester: Decline, ring stopping when the caller hangs up or the user answers elsewhere, a long call, a call ringing a hidden window, Quit during a call, and the corrected call status.
-Also unconfirmed: no popup while the conversation is open and focused; tray Open clicked by hand; how the icon looks in the top bar and dock.
-Next proposed: the snap (GitHub workflows), then internal signaling. The wiki is live (separate repo, `tala.wiki.git`); keep it current with features, and update Installation once the snap is published. The snap's `donation:` is still to add.
-The user is rethinking whether Flutter and the Mac and Windows versions are worth it (2026-11-06). Undecided; don't build for those systems until they decide.
+## Where we left off (2026-11-06, 0.3.1 on candidate)
+Candidate has everything through internal signaling, and the user confirmed a normal HPB call on it. Nothing is on stable. The user is updating the snapcraft.io listing with the icon so it's ready for stable; `assets/icon/tala-512.png` is the store icon.
+Before stable: create the `promote-stable` environment with a required reviewer (GitHub creates a missing one unprotected), and get the user's decision on `AGPL-3.0-only` or or-later. Recheck the ADL database for Ansuz. The Nextcloud trademark question stays unasked until the user says so.
+Needs a second person: Decline, ring stopping when the caller hangs up or the user answers elsewhere, a long call, an Android client on the other side, answering with the slow camera, Quit during a call, a call ringing a hidden window.
+Not confirmed by the user: a report sent from the app itself, no popup while a conversation is open and focused, ringback's and the chime's sound beyond what's noted below, start at login in the snap, the file picker and links in the snap. Internal signaling hasn't run on a real server without the HPB or across different networks.
+The user is rethinking whether Flutter and the Mac and Windows versions are worth it. Undecided; don't build for those systems until they decide. The wiki is a separate repo (`tala.wiki.git`); keep it current with features.
+No next feature is chosen; ask the user.
 
 ## Menu, badge and federation (built 2026-11-06, awaiting the user's look)
 Dock count: `AppTray.setBadge` emits `com.canonical.Unity.LauncherEntry.Update` from `tray.cc`, the same signal Telegram uses. Shown only while the window isn't focused; counts `dockUnread` (skips archived and muted). The user confirmed it works as intended on the dock on 2026-11-06 (`tala --badge-test` shows 7 for 15s). A dock shows it only with Tala's icon present, so a tray-hidden Tala needs to be pinned. A snap has a different desktop file name, so the URI must change, and it needs the unity7 plug. A background start begins unfocused; the hide and show lifecycle states are assumed, check the log's `app:` lines.
