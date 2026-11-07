@@ -12,7 +12,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tala/src/chat.dart' show ApiException;
+import 'package:tala/src/chat.dart' show ApiException, SegmentKind;
+import 'package:tala/src/mentions.dart';
 import 'package:tala/src/nc_api.dart';
 
 void main() {
@@ -57,6 +58,27 @@ void main() {
     final bobId = (await find('bob')).attendeeId;
     final carolId = (await find('carol')).attendeeId;
     expect((await find('bob')).isModerator, isFalse);
+
+    // A mention picked in the composer, as the server sees it.
+    final options = await alice.chatMentions(token, 'bo');
+    final bobOption = options.firstWhere((o) => o.id == 'bob');
+    final everyone = (await alice.chatMentions(token, ''))
+        .firstWhere((o) => o.isEveryone);
+    expect(everyone.wireId, 'all');
+    final picked = PickedMentions();
+    final bobShown = picked.pick(bobOption);
+    final allShown = picked.pick(everyone);
+    final sent = await alice.chatSend(
+      token,
+      picked.expand('Hello $bobShown and $allShown, and @nobody'),
+      'group-check-mention',
+    );
+    expect(
+      sent.segments.where((s) => s.kind == SegmentKind.mention).length,
+      2,
+      reason: 'both picks reached the server as mentions',
+    );
+    expect(sent.text, contains('@nobody'));
 
     // Bob sees it, but can't manage it.
     final bobRoom = await roomOf(bob);

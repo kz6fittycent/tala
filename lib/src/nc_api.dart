@@ -8,6 +8,7 @@ import 'chat.dart';
 import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
+import 'mentions.dart';
 
 /// Also the device name the server lists for Tala's app password.
 const _userAgent = 'Tala/$appVersion';
@@ -647,6 +648,16 @@ class NcApi implements CallSource, ChatSource {
   }
 
   static const _maxPreviewBytes = 20 * 1024 * 1024;
+
+  @override
+  Future<List<MentionOption>> chatMentions(String token, String search) async {
+    final q = Uri.encodeQueryComponent(search);
+    final d = await _ocs('GET', '$_chatV1/$token/mentions?search=$q&limit=6');
+    return [
+      for (final o in d as List)
+        MentionOption.fromJson((o as Map).cast<String, dynamic>()),
+    ];
+  }
 
   @override
   Future<Uint8List> chatPreview(int fileId) async {

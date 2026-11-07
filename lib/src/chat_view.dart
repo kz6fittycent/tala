@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'app_colors.dart';
 import 'chat.dart';
 import 'log.dart';
+import 'mentions.dart';
 import 'nc_api.dart';
 import 'settings.dart';
 
@@ -566,6 +568,104 @@ class _ConversationPaneState extends State<ConversationPane> {
   );
   final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
+
+  /// Survives switching conversations, as the draft holding these names does.
+  static final Map<String, PickedMentions> _pickedByRoom = {};
+  PickedMentions get _picked =>
+      _pickedByRoom.putIfAbsent(widget.room.token, PickedMentions.new);
+  MentionQuery? _mention;
+  List<MentionOption> _mentionOptions = const [];
+  int _mentionHighlight = 0;
+  int _mentionSearch = 0;
+  int? _mentionDismissedAt;
+  Timer? _mentionTimer;
+
+  /// Keeps up with the text and the cursor. Results only show if they're for
+  /// the newest search.
+  void _updateMention() {
+    final found = mentionQueryAt(_input.text, _input.selection);
+    final dismissed = found != null && found.start == _mentionDismissedAt;
+    final query = dismissed ? null : found;
+    if (found == null) _mentionDismissedAt = null;
+    if (query?.start == _mention?.start && query?.text == _mention?.text) {
+      return;
+    }
+    _mention = query;
+    _mentionTimer?.cancel();
+    final search = ++_mentionSearch;
+    if (query == null) {
+      if (_mentionOptions.isNotEmpty) {
+        setState(() => _mentionOptions = const []);
+      }
+      return;
+    }
+    _mentionTimer = Timer(
+      const Duration(milliseconds: 200),
+      () => _searchMentions(query.text, search),
+    );
+  }
+
+  Future<void> _searchMentions(String text, int search) async {
+    try {
+      final options = await widget.source.chatMentions(widget.room.token, text);
+      if (!mounted || search != _mentionSearch) return;
+      setState(() {
+        _mentionOptions = [
+          for (final o in options)
+            if (o.source != 'users' || o.id != widget.room.selfId) o,
+        ].take(5).toList();
+        _mentionHighlight = 0;
+      });
+    } catch (e) {
+      // Not the error itself: its address holds what was typed, maybe a name.
+      log('chat: mention search failed: ${e is ApiException ? e.status : e.runtimeType}');
+      if (mounted && search == _mentionSearch) {
+        setState(() => _mentionOptions = const []);
+      }
+    }
+  }
+
+  void _pickMention(MentionOption option) {
+    final query = _mention;
+    if (query == null) return;
+    _mentionTimer?.cancel();
+    _mentionSearch++;
+    _mention = null;
+    setState(() => _mentionOptions = const []);
+    _input.value = insertMention(_input.value, query, _picked.pick(option));
+    _inputFocus.requestFocus();
+  }
+
+  /// Arrows, Enter, Tab and Escape belong to an open suggestion list.
+  KeyEventResult? _onMentionKey(KeyEvent event) {
+    if (_mentionOptions.isEmpty ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+      return null;
+    }
+    final key = event.logicalKey;
+    final count = _mentionOptions.length;
+    if (key == LogicalKeyboardKey.arrowDown) {
+      setState(() => _mentionHighlight = (_mentionHighlight + 1) % count);
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      setState(() => _mentionHighlight = (_mentionHighlight - 1 + count) % count);
+    } else if (event is KeyDownEvent &&
+        (key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter ||
+            key == LogicalKeyboardKey.tab) &&
+        !_input.value.composing.isValid &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _pickMention(_mentionOptions[_mentionHighlight]);
+    } else if (event is KeyDownEvent && key == LogicalKeyboardKey.escape) {
+      _mentionDismissedAt = _mention?.start;
+      _mentionTimer?.cancel();
+      _mentionSearch++;
+      _mention = null;
+      setState(() => _mentionOptions = const []);
+    } else {
+      return null;
+    }
+    return KeyEventResult.handled;
+  }
   final Map<int, Future<Uint8List>> _previews = {};
   ChatMessage? _replyTo;
   bool _canUpload = false;
@@ -583,6 +683,7 @@ class _ConversationPaneState extends State<ConversationPane> {
       ..active = state == null || state == AppLifecycleState.resumed
       ..start();
     _scroll.addListener(_onScroll);
+    _input.addListener(_updateMention);
     _input.addListener(() {
       if (_editing == null) widget.drafts[widget.room.token] = _input.text;
     });
@@ -620,7 +721,7 @@ class _ConversationPaneState extends State<ConversationPane> {
           ?.showSnackBar(SnackBar(content: Text(message)));
 
   Future<void> _saveEdit(ChatMessage m) async {
-    final error = await _thread.editMessage(m.id, _input.text);
+    final error = await _thread.editMessage(m.id, _picked.expand(_input.text));
     if (!mounted) return;
     if (error != null) {
       // The text stays in the composer, so nothing typed is lost.
@@ -694,14 +795,18 @@ class _ConversationPaneState extends State<ConversationPane> {
     final text = _input.text;
     if (text.trim().isEmpty) return;
     final reply = _replyTo;
+    final wire = _picked.expand(text);
+    _picked.clear();
     _input.clear();
     if (reply != null) setState(() => _replyTo = null);
-    _thread.send(text, replyTo: reply?.id);
+    _thread.send(text, replyTo: reply?.id, wireText: wire);
     if (_scroll.hasClients) _scroll.jumpTo(0);
     _inputFocus.requestFocus();
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final mention = _onMentionKey(event);
+    if (mention != null) return mention;
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.escape) {
       if (_editing != null) {
@@ -729,6 +834,7 @@ class _ConversationPaneState extends State<ConversationPane> {
   void dispose() {
     _lifecycle.dispose();
     _thread.dispose();
+    _mentionTimer?.cancel();
     _input.dispose();
     _inputFocus.dispose();
     _scroll.dispose();
@@ -801,6 +907,12 @@ class _ConversationPaneState extends State<ConversationPane> {
                 text: 'Replying to ${_replyTo!.actorName}: ${_replyTo!.text}',
                 cancelLabel: 'Cancel reply',
                 onCancel: () => setState(() => _replyTo = null),
+              ),
+            if (_mentionOptions.isNotEmpty)
+              _MentionList(
+                options: _mentionOptions,
+                highlighted: _mentionHighlight,
+                onPick: _pickMention,
               ),
             _Composer(
               controller: _input,
@@ -903,6 +1015,59 @@ class _ConversationPaneState extends State<ConversationPane> {
       );
     }
     return out;
+  }
+}
+
+class _MentionList extends StatelessWidget {
+  const _MentionList({
+    required this.options,
+    required this.highlighted,
+    required this.onPick,
+  });
+  final List<MentionOption> options;
+  final int highlighted;
+  final ValueChanged<MentionOption> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      child: Material(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(8),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (i, o) in options.indexed)
+              ListTile(
+                dense: true,
+                selected: i == highlighted,
+                selectedTileColor: scheme.secondaryContainer,
+                leading: Icon(
+                  o.isEveryone || o.isGroup
+                      ? Icons.groups_outlined
+                      : Icons.person_outline,
+                ),
+                title: Text(
+                  o.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: o.details.isEmpty
+                    ? null
+                    : Text(
+                        o.details,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                onTap: () => onPick(o),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'chat.dart' show ApiException;
 import 'log.dart';
 import 'nc_api.dart';
 
@@ -69,7 +70,8 @@ class _PeopleSearchState extends State<PeopleSearch> {
         _failed = false;
       });
     } catch (e) {
-      log('people search failed: $e');
+      // Not the error itself: its address holds what was typed, maybe a name.
+      log('people search failed: ${e is ApiException ? e.status : e.runtimeType}');
       if (!mounted || search != _latest) return;
       setState(() {
         _searching = false;

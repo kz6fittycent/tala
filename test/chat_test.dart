@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/mentions.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
 import 'package:tala/src/app_menu.dart';
@@ -38,6 +39,7 @@ class FakeSource implements ChatSource {
   final List<int> waitAfter = [];
   final List<Completer<ChatMessage>> sends = [];
   final List<String> sent = [];
+  final List<String> sentTexts = [];
   final List<int> marked = [];
   final List<int?> replies = [];
   final List<String> reacted = [];
@@ -103,6 +105,18 @@ class FakeSource implements ChatSource {
   @override
   Future<Uint8List> chatPreview(int fileId) async => Uint8List(0);
 
+  List<MentionOption> mentionOptions = const [];
+  final List<String> mentionSearches = [];
+  Object? mentionError;
+
+  @override
+  Future<List<MentionOption>> chatMentions(String token, String search) async {
+    mentionSearches.add(search);
+    final e = mentionError;
+    if (e != null) throw e;
+    return mentionOptions;
+  }
+
   @override
   Future<void> chatReact(String token, int id, String emoji,
       {required bool remove}) async {
@@ -115,6 +129,7 @@ class FakeSource implements ChatSource {
   Future<ChatMessage> chatSend(String token, String text, String ref,
       {int? replyTo}) {
     sent.add(ref);
+    sentTexts.add(text);
     replies.add(replyTo);
     final c = Completer<ChatMessage>();
     sends.add(c);
@@ -661,6 +676,127 @@ void main() {
       expect(find.byTooltip('Start a call'), findsNothing);
       expect(find.byType(TextField), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    group('mention suggestions', () {
+      FakeSource source() => FakeSource()
+        ..history = ((_) => [msg(1)])
+        ..mentionOptions = const [
+          MentionOption(id: 'me', label: 'Myself'),
+          MentionOption(id: 'maya.c', label: 'Maya Chen', mentionId: 'maya.c'),
+          MentionOption(id: 'marco', label: 'Marco Silva'),
+          MentionOption(
+            id: 'all',
+            label: 'Family',
+            source: 'calls',
+            details: 'All 3 participants',
+          ),
+        ];
+
+      Future<void> type(WidgetTester tester, String text) async {
+        await tester.enterText(find.byType(TextField), text);
+        await tester.pump(const Duration(milliseconds: 250));
+        await tester.pump();
+      }
+
+      testWidgets('@ offers people but not yourself, and picking inserts the '
+          'name while the server gets the id', (tester) async {
+        final src = source();
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pump();
+        await type(tester, 'hi @ma');
+        expect(src.mentionSearches, ['ma']);
+        expect(find.text('Maya Chen'), findsOneWidget);
+        expect(find.text('All 3 participants'), findsOneWidget);
+        expect(find.text('Myself'), findsNothing);
+        await tester.tap(find.text('Maya Chen'));
+        await tester.pump();
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.controller!.text, 'hi @Maya Chen ');
+        expect(field.controller!.selection.baseOffset, 14);
+        expect(find.text('Marco Silva'), findsNothing);
+        await tester.enterText(find.byType(TextField), 'hi @Maya Chen, and you');
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(src.sentTexts, ['hi @"maya.c", and you']);
+        // Until the server's copy arrives, it reads as it was typed.
+        expect(find.textContaining('@Maya Chen', findRichText: true), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('arrows choose, Enter picks instead of sending, Escape closes',
+          (tester) async {
+        final src = source();
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pump();
+        await type(tester, '@m');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(src.sentTexts, isEmpty);
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.controller!.text, '@Marco Silva ');
+
+        await type(tester, '@Marco Silva @x');
+        expect(find.text('Maya Chen'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(find.text('Maya Chen'), findsNothing);
+        // More typing in that same mention doesn't reopen the list.
+        await type(tester, '@Marco Silva @xy');
+        expect(find.text('Maya Chen'), findsNothing);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(src.sentTexts, ['@"marco" @xy']);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('an email address offers nothing, and a failed search is '
+          'quiet', (tester) async {
+        final src = source();
+        await tester.pumpWidget(pane(src, room()));
+        await tester.pump();
+        await type(tester, 'pat@example.com');
+        expect(src.mentionSearches, isEmpty);
+        src.mentionError = ApiException(500, 'p');
+        await type(tester, '@sam');
+        expect(src.mentionSearches, ['sam']);
+        expect(find.byType(ListTile), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('a name picked in a draft survives leaving the conversation',
+          (tester) async {
+        final src = source();
+        final drafts = <String, String>{};
+        Widget open(Key key) => MaterialApp(
+          home: Scaffold(
+            body: ConversationPane(
+              key: key,
+              source: src,
+              room: room(),
+              drafts: drafts,
+              onBack: () {},
+              onCall: () {},
+            ),
+          ),
+        );
+        await tester.pumpWidget(open(const ValueKey(1)));
+        await tester.pump();
+        await type(tester, '@m');
+        await tester.tap(find.text('Marco Silva'));
+        await tester.pump();
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(open(const ValueKey(2)));
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(src.sentTexts, ['@"marco"']);
+        await tester.pumpWidget(const SizedBox());
+      });
     });
 
     testWidgets('Enter sends and Shift+Enter does not', (tester) async {

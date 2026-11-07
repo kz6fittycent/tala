@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'log.dart';
+import 'mentions.dart';
 
 class ApiException implements Exception {
   ApiException(this.status, this.path);
@@ -279,13 +280,27 @@ abstract class ChatSource {
 
   /// A preview of an image the user can already access.
   Future<Uint8List> chatPreview(int fileId);
+
+  /// Who can be mentioned here whose name matches [search], which may be empty.
+  Future<List<MentionOption>> chatMentions(String token, String search);
 }
 
 enum SendState { sending, failed }
 
 class OutgoingMessage {
-  OutgoingMessage(this.text, this.referenceId, {this.replyTo, this.filePath});
+  OutgoingMessage(
+    this.text,
+    this.referenceId, {
+    this.replyTo,
+    this.filePath,
+    String? wireText,
+  }) : wireText = wireText ?? text;
+
+  /// What's shown while sending.
   final String text;
+
+  /// What the server gets, which holds mentions as ids.
+  final String wireText;
   final String referenceId;
   final int? replyTo;
 
@@ -477,10 +492,17 @@ class ChatThread extends ChangeNotifier {
   }
 
   /// Returns once the attempt finishes. A failure stays listed for retry.
-  Future<void> send(String text, {int? replyTo}) async {
+  /// [wireText] is what the server gets, when that differs from what's shown
+  /// until the server's copy arrives, as with mentions.
+  Future<void> send(String text, {int? replyTo, String? wireText}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final o = OutgoingMessage(trimmed, newReferenceId(), replyTo: replyTo);
+    final o = OutgoingMessage(
+      trimmed,
+      newReferenceId(),
+      replyTo: replyTo,
+      wireText: wireText?.trim(),
+    );
     _outgoing.add(o);
     _changed();
     await _attempt(o);
@@ -581,7 +603,7 @@ class ChatThread extends ChangeNotifier {
         if (_disposed) return;
         // The poll delivers the resulting message.
       } else {
-        final sent = await _source.chatSend(token, o.text, o.referenceId,
+        final sent = await _source.chatSend(token, o.wireText, o.referenceId,
             replyTo: o.replyTo);
         if (_disposed) return;
         // The poll advances _newestId; doing it here could skip a message

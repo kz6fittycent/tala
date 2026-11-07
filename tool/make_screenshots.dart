@@ -19,6 +19,7 @@ import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/groups.dart';
+import 'package:tala/src/mentions.dart';
 import 'package:tala/src/chat_view.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
@@ -110,6 +111,20 @@ class _DemoSource implements ChatSource {
   Future<void> chatShareFile(String t, String p, String r) async {}
   @override
   Future<Uint8List> chatPreview(int f) => throw UnimplementedError();
+  @override
+  Future<List<MentionOption>> chatMentions(String t, String q) async => [
+    for (final o in const [
+      MentionOption(id: 'maya', label: 'Maya Chen'),
+      MentionOption(id: 'marco', label: 'Marco Silva'),
+      MentionOption(
+        id: 'all',
+        label: 'Weekend hike',
+        source: 'calls',
+        details: 'All 3 participants',
+      ),
+    ])
+      if (o.label.toLowerCase().contains(q) || o.isEveryone) o,
+  ];
 }
 
 final _hike = Room(
@@ -348,6 +363,18 @@ void main() {
         await _settle(t);
         await t.enterText(find.byType(TextField).last, 'ma');
         await t.pump(const Duration(milliseconds: 400));
+      },
+    );
+  });
+
+  testWidgets('mentions', (t) {
+    return scene(
+      t,
+      'mentions',
+      _main(),
+      then: () async {
+        await t.enterText(find.byType(TextField).last, 'Are you coming, @ma');
+        await t.pump(const Duration(milliseconds: 300));
       },
     );
   });
