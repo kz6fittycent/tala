@@ -118,4 +118,64 @@ void main() {
       expect(at(tester, self).width, 128);
     });
   });
+
+  group('shared screen', () {
+    Future<void> show(
+      WidgetTester tester, {
+      int screens = 1,
+      int people = 2,
+    }) async {
+      tester.view.physicalSize = const Size(1000, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScreenStage(
+            screens: [
+              for (var i = 0; i < screens; i++)
+                SizedBox(key: ValueKey('screen $i')),
+            ],
+            people: [
+              for (var i = 0; i < people; i++)
+                SizedBox(key: ValueKey('person $i')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    testWidgets('takes the space, with people in a row below', (tester) async {
+      await show(tester);
+      final screen = tester.getRect(find.byKey(const ValueKey('screen 0')));
+      final person = tester.getRect(find.byKey(const ValueKey('person 0')));
+      expect(screen.width, 1000);
+      expect(screen.height, 700 - screenStripHeight - screenControlsSpace);
+      expect(person.top, greaterThanOrEqualTo(screen.bottom));
+      expect(person.bottom, lessThanOrEqualTo(700 - screenControlsSpace));
+      expect(person.width / person.height, closeTo(16 / 9, 0.01));
+    });
+
+    testWidgets('alone, a screen gets everything above the controls', (
+      tester,
+    ) async {
+      await show(tester, people: 0);
+      final screen = tester.getRect(find.byKey(const ValueKey('screen 0')));
+      expect(screen.height, 700 - screenControlsSpace);
+    });
+
+    testWidgets('with no screen, people fill the space as before', (
+      tester,
+    ) async {
+      await show(tester, screens: 0, people: 1);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('person 0'))).size,
+        const Size(1000, 700),
+      );
+    });
+
+    testWidgets('many people scroll rather than overflow', (tester) async {
+      await show(tester, people: 12);
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

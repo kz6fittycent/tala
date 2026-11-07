@@ -6,13 +6,17 @@ import 'package:tala/src/internal_signaling.dart';
 
 void main() {
   group('who starts a direct connection', () {
-    MeshRole role(String mine, String theirs, {bool self = true, bool them = true}) =>
-        meshRole(
-          mine: mine,
-          theirs: theirs,
-          selfHasStreams: self,
-          theyHaveStreams: them,
-        );
+    MeshRole role(
+      String mine,
+      String theirs, {
+      bool self = true,
+      bool them = true,
+    }) => meshRole(
+      mine: mine,
+      theirs: theirs,
+      selfHasStreams: self,
+      theyHaveStreams: them,
+    );
 
     test('the larger session id offers, and the other waits', () {
       expect(role('b', 'a'), MeshRole.offer);
@@ -20,7 +24,12 @@ void main() {
     });
 
     test('exactly one side offers, whatever the ids', () {
-      for (final (x, y) in [('a', 'b'), ('Z', 'a'), ('abc', 'abd'), ('a+b', 'a/b')]) {
+      for (final (x, y) in [
+        ('a', 'b'),
+        ('Z', 'a'),
+        ('abc', 'abd'),
+        ('a+b', 'a/b'),
+      ]) {
         expect({role(x, y), role(y, x)}, {MeshRole.offer, MeshRole.wait});
       }
     });
@@ -34,8 +43,11 @@ void main() {
   });
 
   group('messages held while the camera opens', () {
-    Map<String, dynamic> m(String type, String from, String sid) =>
-        {'type': type, 'from': from, 'sid': sid};
+    Map<String, dynamic> m(String type, String from, String sid) => {
+      'type': type,
+      'from': from,
+      'sid': sid,
+    };
 
     test('only the newest offer from each person survives, in order', () {
       final fresh = freshMeshMessages([
@@ -52,6 +64,32 @@ void main() {
         'candidate b 7',
         'candidate a 2',
       ]);
+    });
+
+    test('a shared screen is kept apart from the same person\'s camera', () {
+      Map<String, dynamic> screen(String type, String sid) => {
+        ...m(type, 'a', sid),
+        'roomType': 'screen',
+      };
+      final fresh = freshMeshMessages([
+        m('offer', 'a', '1'),
+        screen('offer', 's1'),
+        screen('offer', 's2'),
+        m('candidate', 'a', '1'),
+        screen('candidate', 's1'),
+        screen('candidate', 's2'),
+      ]);
+      expect(
+        fresh.map(
+          (x) => '${x['type']} ${x['roomType'] ?? 'video'} ${x['sid']}',
+        ),
+        [
+          'offer video 1',
+          'offer screen s2',
+          'candidate video 1',
+          'candidate screen s2',
+        ],
+      );
     });
 
     test('messages from someone with no offer pass through', () {

@@ -109,3 +109,44 @@ class FillGrid extends StatelessWidget {
     );
   }
 }
+
+/// Height of the row of people under a shared screen, and the space left
+/// below it for the call's controls.
+const screenStripHeight = 96.0;
+const screenControlsSpace = 76.0;
+
+/// A shared screen is shown whole, never cropped, because its detail is the
+/// point. People's videos move to a row beneath it. With no screen, people
+/// share the space as usual.
+class ScreenStage extends StatelessWidget {
+  const ScreenStage({super.key, required this.screens, required this.people});
+  final List<Widget> screens;
+  final List<Widget> people;
+
+  @override
+  Widget build(BuildContext context) {
+    if (screens.isEmpty) return FillGrid(children: people);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: FillGrid(children: screens)),
+        if (people.isNotEmpty)
+          SizedBox(
+            height: screenStripHeight,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(top: 4),
+              children: [
+                for (final p in people)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: AspectRatio(aspectRatio: 16 / 9, child: p),
+                  ),
+              ],
+            ),
+          ),
+        const SizedBox(height: screenControlsSpace),
+      ],
+    );
+  }
+}

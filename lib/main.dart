@@ -1118,16 +1118,28 @@ class _CallPageState extends State<CallPage> {
           backgroundColor: Colors.black,
           appBar: AppBar(title: Text('${widget.room.name}: ${_call.state}')),
           body: CallLayout(
-            // Cover crops to fill, whatever shape the other camera sends.
-            others: FillGrid(children: [
-              for (final r in _call.remotes)
-                RTCVideoView(
-                  r,
-                  key: ObjectKey(r),
-                  objectFit:
-                      RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                ),
-            ]),
+            others: ScreenStage(
+              // Contain: a shared screen loses nothing to cropping.
+              screens: [
+                for (final r in _call.screens)
+                  RTCVideoView(
+                    r,
+                    key: ObjectKey(r),
+                    objectFit:
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                  ),
+              ],
+              // Cover crops to fill, whatever shape the other camera sends.
+              people: [
+                for (final r in _call.remotes)
+                  RTCVideoView(
+                    r,
+                    key: ObjectKey(r),
+                    objectFit:
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
+              ],
+            ),
             self: RTCVideoView(
               _call.localRenderer,
               mirror: true,
