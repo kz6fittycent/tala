@@ -5,6 +5,7 @@ import 'app_info.dart';
 import 'chat_view.dart';
 import 'log.dart';
 import 'nc_api.dart';
+import 'report_view.dart';
 import 'settings.dart';
 import 'tray.dart';
 
@@ -124,6 +125,7 @@ enum _MenuChoice {
   archived,
   startAtLogin,
   help,
+  report,
   about,
   support,
 }
@@ -205,6 +207,8 @@ class _AppMenuState extends State<AppMenu> {
         _toggleStartAtLogin();
       case _MenuChoice.help:
         openExternal(wikiUrl);
+      case _MenuChoice.report:
+        showReportDialog(context, creds: creds);
       case _MenuChoice.about:
         showDialog<void>(context: context, builder: (_) => const AboutTala());
       case _MenuChoice.support:
@@ -252,6 +256,7 @@ class _AppMenuState extends State<AppMenu> {
         ),
       const PopupMenuDivider(),
       _item(_MenuChoice.help, Icons.help_outline, 'Help'),
+      _item(_MenuChoice.report, Icons.bug_report_outlined, 'Report a problem…'),
       _item(_MenuChoice.about, Icons.info_outline, 'About Tala'),
       _item(_MenuChoice.support, Icons.favorite_outline, 'Support Tala'),
     ],

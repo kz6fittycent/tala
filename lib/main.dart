@@ -27,11 +27,14 @@ import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
 import 'src/frame_log.dart';
+import 'src/report.dart';
+import 'src/report_view.dart';
 import 'src/call_layout.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  log('Tala $appVersion starting');
+  log('=== Tala $appVersion starting · ${reportPlatform()}');
+  installCrashCapture();
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(
       const ['Tala'],
@@ -51,6 +54,25 @@ Future<void> main(List<String> args) async {
       exit(1);
     }
     await NcApi(creds).chatCheck();
+    exit(0);
+  }
+  if (args.contains('--report-check')) {
+    // What a report would hold, without sending anything.
+    Credentials? creds;
+    try {
+      creds = await AccountStore().load();
+    } on KeyringException catch (e) {
+      log('report check: keyring failed: ${e.message}');
+    }
+    final report = buildReport(
+      description: '',
+      contact: '',
+      facts: await gatherFacts(api: creds == null ? null : NcApi(creds)),
+      creds: creds,
+    );
+    log('report check: platform ${report.platform}');
+    log('report check: facts\n${report.facts}');
+    log('report check: ${report.log.length} characters of log');
     exit(0);
   }
   if (args.contains('--keyring-selftest')) {
@@ -98,6 +120,13 @@ Future<void> main(List<String> args) async {
     return;
   }
   startFrameLog();
+  Timer(const Duration(seconds: 15), sendPendingReports);
+  if (args.contains('--crash-test')) {
+    // Throws on purpose, to check the capture and the report it offers.
+    Timer(const Duration(seconds: 3), () {
+      throw StateError('Tala crash test 123');
+    });
+  }
   runApp(args.contains('--selftest')
       ? const SelfTest()
       : args.contains('--camera-cycle')
@@ -330,6 +359,11 @@ class _StartPageState extends State<StartPage> {
               ),
               const SizedBox(height: 16),
               FilledButton(onPressed: _retry, child: const Text('Try again')),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => showReportDialog(context),
+                child: const Text('Report a problem'),
+              ),
             ]),
           ),
         ),
@@ -359,7 +393,20 @@ class LoginPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: Center(
-      child: SizedBox(width: 420, child: SignInForm(onSignedIn: onSignedIn)),
+      child: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SignInForm(onSignedIn: onSignedIn),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => showReportDialog(context),
+              child: const Text('Report a problem'),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }
@@ -464,6 +511,24 @@ class _RoomsPageState extends State<RoomsPage> {
     await Call.current?.hangUp();
   }
 
+  void _offerEarlierCrash() {
+    final crash = previousCrash();
+    if (crash == null || !mounted) return;
+    showReportDialog(
+      context,
+      creds: widget.api.creds,
+      crash: crash,
+      earlier: true,
+    );
+  }
+
+  /// Not over a call: it stays saved and is offered at the next start.
+  void _offerNewCrash() {
+    final crash = newCrash.value;
+    if (crash == null || !mounted || Call.current != null) return;
+    showReportDialog(context, creds: widget.api.creds, crash: crash);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -478,6 +543,8 @@ class _RoomsPageState extends State<RoomsPage> {
       ..onConversationRead = _alerts.conversationRead;
     _incoming.addListener(_onIncomingChanged);
     _incoming.start();
+    newCrash.addListener(_offerNewCrash);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _offerEarlierCrash());
     _refreshRooms();
     _roomTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => _refreshRooms());
@@ -631,6 +698,7 @@ class _RoomsPageState extends State<RoomsPage> {
 
   @override
   void dispose() {
+    newCrash.removeListener(_offerNewCrash);
     _tray.stop();
     _lifecycle.dispose();
     widget.api

@@ -682,6 +682,15 @@ class NcApi implements CallSource, ChatSource {
   Future<void> joinCall(String token, int flags) =>
       _ocs('POST', '$_talkV4/call/$token', body: {'flags': flags});
 
+  /// Software versions and whether calls can work, for problem reports. Holds
+  /// nothing that identifies the server.
+  Future<String?> serverSummary() async {
+    final d = await _ocs('GET', '/ocs/v2.php/cloud/capabilities') as Map;
+    final version = (d['version'] as Map?)?['string'];
+    final talk = ((d['capabilities'] as Map?)?['spreed'] as Map?)?['version'];
+    return 'Nextcloud ${version ?? '?'}, Talk ${talk ?? '?'}';
+  }
+
   /// Corrects what this participant said it's sending when it joined.
   Future<void> updateCallFlags(String token, int flags) =>
       _ocs('PUT', '$_talkV4/call/$token', body: {'flags': flags});
