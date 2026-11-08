@@ -173,6 +173,9 @@ class Call extends ChangeNotifier {
   /// The user's screen is going out to the call.
   bool get sharingScreen => _capture != null && !choosingScreen;
 
+  /// What the user is sharing, as it leaves here, so a presenter isn't blind.
+  RTCVideoRenderer? ownScreen;
+
   List<RTCVideoRenderer> get remotes => [
     for (final p in _subs.values)
       if (p.renderer != null) p.renderer!,
@@ -873,6 +876,14 @@ class Call extends ChangeNotifier {
         if (identical(_capture, capture)) unawaited(stopSharing());
       }),
     );
+    final preview = RTCVideoRenderer();
+    await preview.initialize();
+    if (!identical(_capture, capture)) {
+      await preview.dispose();
+      return null;
+    }
+    preview.srcObject = capture.stream;
+    ownScreen = preview;
     notifyListeners();
     try {
       if (_mesh) {
@@ -977,7 +988,10 @@ class Call extends ChangeNotifier {
     if (capture == null) return;
     _capture = null;
     choosingScreen = false;
+    final preview = ownScreen;
+    ownScreen = null;
     notifyListeners();
+    await preview?.dispose();
     if (_screenPublisher case final p?) {
       // Through a media server, one message reaches the whole room.
       final sig = _sig;

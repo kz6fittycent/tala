@@ -1141,6 +1141,13 @@ class _CallPageState extends State<CallPage> {
             others: ScreenStage(
               // Contain: a shared screen loses nothing to cropping.
               screens: [
+                if (_call.ownScreen case final own?)
+                  RTCVideoView(
+                    own,
+                    key: ObjectKey(own),
+                    objectFit:
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                  ),
                 for (final r in _call.screens)
                   RTCVideoView(
                     r,
