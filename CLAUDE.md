@@ -23,7 +23,7 @@ Needs the user signed in: tray, background start, real login autostart, notifica
 The user wants to refine this further first. Do not post to Nextcloud until they say so.
 
 - Snap Store auto-connect requests: camera, audio-record, password-manager-service (the earlier browser-sandbox request was for the old ZIP snap).
-- Register the name, set grade stable, add the workflows, tell upstream on nextcloud/talk-desktop#913.
+- Register the name, set grade stable, add the workflows, tell upstream on nextcloud/talk-desktop#913. Done 2026-11-07: Tala went to stable at 0.6.1, the store license now reads AGPL-3.0-or-later, and with the user's approval I posted an FYI comment on #913 (independent client, not affiliated, links to the repo and wiki).
 - Trademark: settled by the user on 2026-11-07. The worry was about the old ZIP, which Tala no longer uses, and they consider Nextcloud's rules loose enough that no question needs asking. Keep "Nextcloud" out of the name, executable, icon, marketing graphics and domain; factual description use is fine if independence is clear.
 
 ## Open refinements
