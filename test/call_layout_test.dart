@@ -178,4 +178,20 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+  group('sharing banner', () {
+    testWidgets('fits a narrow window and stops when asked', (tester) async {
+      tester.view.physicalSize = const Size(320, 200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      var stopped = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SharingBanner(onStop: () => stopped++)),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Stop sharing'));
+      expect(stopped, 1);
+    });
+  });
 }

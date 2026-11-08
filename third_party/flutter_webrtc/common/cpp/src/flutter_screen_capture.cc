@@ -13,6 +13,11 @@
 #include <windows.h>
 #endif
 
+#ifdef __linux__
+#include "portal_screencast.h"
+#include "rtc_video_frame.h"
+#endif
+
 namespace flutter_webrtc_plugin {
 
 namespace {
@@ -128,6 +133,9 @@ FlutterScreenCapture::FlutterScreenCapture(FlutterWebRTCBase* base)
 FlutterScreenCapture::~FlutterScreenCapture() {
   closing_ = true;
 
+#ifdef __linux__
+  portal_captures_.clear();
+#endif
   // From here on libwebrtc callbacks no longer reach this object.
   observer_proxy_->Detach();
 
@@ -651,5 +659,84 @@ void FlutterScreenCapture::GetDisplayMedia(
 
   result->Success(EncodableValue(params));
 }
+
+#ifdef __linux__
+void FlutterScreenCapture::GetPortalDisplayMedia(
+    const EncodableMap& constraints,
+    std::unique_ptr<MethodResultProxy> result) {
+  bool show_cursor = true;
+  const EncodableMap video = findMap(constraints, "video");
+  const std::string cursor = findString(video, "cursor");
+  if (!cursor.empty()) {
+    show_cursor = (cursor == "always");
+  }
+
+  const std::string uuid = base_->GenerateUUID();
+  scoped_refptr<RTCMediaStream> stream =
+      base_->factory_->CreateStream(uuid.c_str());
+  scoped_refptr<RTCVideoSource> source =
+      base_->factory_->CreateCustomVideoSource(
+          "portal_screen", base_->ParseMediaConstraints(EncodableMap()));
+  scoped_refptr<RTCVideoTrack> track =
+      base_->factory_->CreateVideoTrack(source, uuid.c_str());
+  stream->AddTrack(track);
+  base_->local_tracks_[track->id().std_string()] = track;
+  base_->video_sources_[track->id().std_string()] = {source};
+  base_->local_streams_[uuid] = stream;
+
+  FlutterWebRTCBase* base = base_;
+  auto capture = std::make_unique<PortalScreenCast>(
+      [source](const PortalScreenCast::I420Frame& f) {
+        source->OnCapturedFrame(RTCVideoFrame::Create(
+            f.width, f.height, f.y.data(), f.width, f.u.data(),
+            (f.width + 1) / 2, f.v.data(), (f.width + 1) / 2));
+      },
+      [base, uuid](PortalScreenCast::State state, const std::string&) {
+        const char* name = "failed";
+        switch (state) {
+          case PortalScreenCast::State::kSharing:
+            name = "sharing";
+            break;
+          case PortalScreenCast::State::kCancelled:
+            name = "cancelled";
+            break;
+          case PortalScreenCast::State::kStopped:
+            name = "stopped";
+            break;
+          case PortalScreenCast::State::kFailed:
+            break;
+        }
+        EncodableMap info;
+        info[EncodableValue("event")] = EncodableValue("portalScreenCast");
+        info[EncodableValue("streamId")] = EncodableValue(uuid);
+        info[EncodableValue("state")] = EncodableValue(std::string(name));
+        base->event_channel()->Success(EncodableValue(info), false);
+      });
+  PortalScreenCast* started = capture.get();
+  portal_captures_[uuid] = std::move(capture);
+  started->Start(show_cursor);
+
+  EncodableMap info;
+  info[EncodableValue("id")] = EncodableValue(track->id().std_string());
+  info[EncodableValue("label")] = EncodableValue(track->id().std_string());
+  info[EncodableValue("kind")] = EncodableValue(track->kind().std_string());
+  info[EncodableValue("enabled")] = EncodableValue(track->enabled());
+  EncodableMap params;
+  params[EncodableValue("streamId")] = EncodableValue(uuid);
+  params[EncodableValue("audioTracks")] = EncodableValue(EncodableList());
+  params[EncodableValue("videoTracks")] =
+      EncodableValue(EncodableList{EncodableValue(info)});
+  result->Success(EncodableValue(params));
+}
+
+void FlutterScreenCapture::StopPortalDisplayMedia(
+    const std::string& stream_id,
+    std::unique_ptr<MethodResultProxy> result) {
+  // Ends the share and closes the session. The stream itself is disposed of
+  // as any other, through mediaStreamDispose.
+  portal_captures_.erase(stream_id);
+  result->Success();
+}
+#endif
 
 }  // namespace flutter_webrtc_plugin

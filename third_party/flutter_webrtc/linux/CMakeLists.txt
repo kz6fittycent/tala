@@ -35,6 +35,7 @@ add_library(${PLUGIN_NAME} SHARED
   "flutter/standard_codec.cc"
   "flutter/plugin_registrar.cc"
   "task_runner_linux.cc"
+  "portal_screencast.cc"
 )
 
 include_directories(
@@ -56,6 +57,17 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
 )
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
+
+# Tala: screen capture through the portal and PipeWire (portal_screencast.cc).
+# Needs libpipewire-0.3-dev to build.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TALA_PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+pkg_check_modules(TALA_GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0)
+target_link_libraries(${PLUGIN_NAME} PRIVATE
+  PkgConfig::TALA_PIPEWIRE PkgConfig::TALA_GIO_UNIX)
+# SPA's headers trip these with -Werror.
+set_source_files_properties(portal_screencast.cc PROPERTIES
+  COMPILE_OPTIONS "-Wno-missing-field-initializers;-Wno-unused-parameter")
 
 # GCC 14+ (and notably GCC 16) tightened transitive header inclusion, so the
 # bundled libwebrtc headers (e.g. third_party/libwebrtc/include/rtc_types.h)

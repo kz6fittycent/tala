@@ -69,6 +69,9 @@ parts:
       - git
       - libayatana-appindicator3-dev
       - libgtk-3-dev
+      # Screen sharing (third_party/flutter_webrtc/linux/portal_screencast.cc).
+      # The library itself comes from the GNOME runtime.
+      - libpipewire-0.3-dev
       - libsecret-1-dev
       - ninja-build
       - pkg-config

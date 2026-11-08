@@ -1105,6 +1105,15 @@ class _CallPageState extends State<CallPage> {
     setState(() {});
   }
 
+  Future<void> _toggleScreen() async {
+    if (_call.sharingScreen) return _call.stopSharing();
+    final messenger = ScaffoldMessenger.of(context);
+    final problem = await _call.shareScreen();
+    if (problem != null && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(problem)));
+    }
+  }
+
   @override
   void dispose() {
     _call.hangUp();
@@ -1117,7 +1126,18 @@ class _CallPageState extends State<CallPage> {
         builder: (context, _) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(title: Text('${widget.room.name}: ${_call.state}')),
-          body: CallLayout(
+          body: Column(
+            children: [
+              // GNOME may show nothing while a screen is shared, so Tala does.
+              if (_call.sharingScreen)
+                SharingBanner(onStop: _call.stopSharing),
+              Expanded(child: _layout(context)),
+            ],
+          ),
+        ),
+      );
+
+  Widget _layout(BuildContext context) => CallLayout(
             others: ScreenStage(
               // Contain: a shared screen loses nothing to cropping.
               screens: [
@@ -1173,6 +1193,17 @@ class _CallPageState extends State<CallPage> {
                     onPressed: _call.toggleCam),
                 const SizedBox(width: 12),
                 IconButton.filled(
+                    tooltip: _call.choosingScreen
+                        ? 'Choose what to share in the system\'s window'
+                        : _call.sharingScreen
+                            ? 'Stop sharing your screen'
+                            : 'Share your screen',
+                    icon: Icon(_call.sharingScreen
+                        ? Icons.stop_screen_share
+                        : Icons.screen_share),
+                    onPressed: _call.choosingScreen ? null : _toggleScreen),
+                const SizedBox(width: 12),
+                IconButton.filled(
                     tooltip: widget.settings.callChatOpen
                         ? 'Hide chat'
                         : 'Show chat',
@@ -1188,7 +1219,5 @@ class _CallPageState extends State<CallPage> {
                     onPressed: () => Navigator.of(context).pop()),
               ],
             ),
-          ),
-        ),
-      );
+          );
 }

@@ -23,3 +23,6 @@ export 'src/native/android/audio_configuration.dart';
 export 'src/native/ios/audio_configuration.dart';
 export 'src/native/rtc_video_platform_view_controller.dart';
 export 'src/native/rtc_video_platform_view.dart';
+// Tala: for getPortalDisplayMedia's reply and its events (TALA_PATCHES.md).
+export 'src/native/event_channel.dart' show FlutterWebRTCEventChannel;
+export 'src/native/media_stream_impl.dart' show MediaStreamNative;

@@ -150,3 +150,35 @@ class ScreenStage extends StatelessWidget {
     );
   }
 }
+
+/// Says the user's screen is going out to the call, with a way to stop.
+class SharingBanner extends StatelessWidget {
+  const SharingBanner({super.key, required this.onStop});
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+        child: Row(
+          children: [
+            Icon(Icons.screen_share, color: colors.onPrimaryContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'You\'re sharing your screen',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.onPrimaryContainer),
+              ),
+            ),
+            FilledButton(onPressed: onStop, child: const Text('Stop sharing')),
+          ],
+        ),
+      ),
+    );
+  }
+}

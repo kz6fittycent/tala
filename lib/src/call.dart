@@ -9,6 +9,7 @@ import 'internal_signaling.dart';
 import 'log.dart';
 import 'ringer.dart';
 import 'nc_api.dart';
+import 'screen_share.dart';
 import 'signaling.dart';
 
 const _flagInCall = 1, _flagAudio = 2, _flagVideo = 4;
@@ -48,7 +49,17 @@ MeshRole meshRole({
 }
 
 class _Peer {
-  _Peer(this.session, this.sid, this.pc, {this.roomType = 'video'});
+  _Peer(
+    this.session,
+    this.sid,
+    this.pc, {
+    this.roomType = 'video',
+    this.broadcaster,
+  });
+
+  /// Whose screen a direct screen connection carries. The web client reads a
+  /// screen offer without it as asking it to share its own.
+  final String? broadcaster;
   final String session; // signaling session id; our own for the publisher
   final String sid;
 
@@ -131,6 +142,19 @@ class Call extends ChangeNotifier {
 
   /// Screens other people are sharing, by their session. Receive-only.
   final Map<String, _Peer> _screens = {};
+
+  /// The user's own screen: the capture, and where it goes. Through a media
+  /// server it's published once and the server offers it to each person
+  /// ([_screenSentTo]); without one, each person gets a connection
+  /// ([_sharing]).
+  ScreenCapture? _capture;
+  _Peer? _screenPublisher;
+  bool _screenPublished = false;
+  final Set<String> _screenSentTo = {};
+  final Map<String, _Peer> _sharing = {};
+
+  /// Everyone else in the call, through a media server.
+  final Set<String> _inCall = {};
   final Map<String, Timer> _offerRetry = {};
   bool _ended = false;
   bool _joinedRoom = false;
@@ -142,6 +166,12 @@ class Call extends ChangeNotifier {
   String state = 'Starting';
   bool micOn = true;
   bool camOn = true;
+
+  /// The system's picker is open.
+  bool choosingScreen = false;
+
+  /// The user's screen is going out to the call.
+  bool get sharingScreen => _capture != null && !choosingScreen;
 
   List<RTCVideoRenderer> get remotes => [
     for (final p in _subs.values)
@@ -314,6 +344,7 @@ class Call extends ChangeNotifier {
     'type': type,
     'sid': p.sid,
     'roomType': p.roomType,
+    'broadcaster': ?p.broadcaster,
   };
 
   void _wireIce(_Peer p, String label) {
@@ -382,6 +413,8 @@ class Call extends ChangeNotifier {
         for (final s in _screens.keys.toList()) {
           _dropScreen(s);
         }
+        _inCall.clear();
+        _screenSentTo.clear();
         return;
       }
       for (final u in (update?['users'] as List? ?? const [])) {
@@ -392,9 +425,11 @@ class Call extends ChangeNotifier {
         if (inCall & _flagInCall != 0) {
           _otherArrived = true;
           _ringback.stop();
+          _inCall.add(session);
+          _sendScreenTo(session);
         }
         if (inCall & _flagInCall == 0) {
-          _dropSub(session);
+          _leftCall(session);
         } else if (inCall & (_flagAudio | _flagVideo) != 0 &&
             !_subs.containsKey(session)) {
           _requestOffer(session);
@@ -402,9 +437,16 @@ class Call extends ChangeNotifier {
       }
     } else if (target == 'room' && e['type'] == 'leave') {
       for (final s in (e['leave'] as List? ?? const [])) {
-        _dropSub(s as String);
+        _leftCall(s as String);
       }
     }
+  }
+
+  void _leftCall(String session) {
+    _inCall.remove(session);
+    // Offered again if they come back.
+    _screenSentTo.remove(session);
+    _dropSub(session);
   }
 
   /// A publisher may still be connecting when we first ask, so keep asking
@@ -436,13 +478,24 @@ class Call extends ChangeNotifier {
       final roomType = data['roomType'];
       switch (data['type']) {
         case 'answer':
-          final p = _publisher;
+          final screen = _screenPublisher;
+          final forScreen =
+              screen != null &&
+              (data['sid'] == screen.sid ||
+                  (data['sid'] == null && roomType == 'screen'));
+          final p = forScreen ? screen : _publisher;
           if (p == null || payload == null) return;
           await p.pc.setRemoteDescription(
             RTCSessionDescription(payload['sdp'], 'answer'),
           );
           await p.flush();
-          log('publisher: answer applied');
+          if (forScreen) {
+            log('screen publisher: answer applied');
+            _screenPublished = true;
+            _inCall.forEach(_sendScreenTo);
+          } else {
+            log('publisher: answer applied');
+          }
         case 'offer':
           if (from == null || payload == null) return;
           final sid = data['sid'] as String;
@@ -458,10 +511,11 @@ class Call extends ChangeNotifier {
         case 'candidate':
           final c = payload?['candidate'] as Map?;
           if (c == null || c['candidate'] == null) return;
+          final sid = data['sid'];
           final peer = from == _sig.sessionId
-              ? _publisher
+              ? (roomType == 'screen' ? _screenPublisher : _publisher)
               : roomType == 'screen'
-              ? _screens[from]
+              ? (_sharing[from]?.sid == sid ? _sharing[from] : _screens[from])
               : _subs[from];
           await peer?.addCandidate(
             RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']),
@@ -507,7 +561,13 @@ class Call extends ChangeNotifier {
     if (_ended) return;
     await _dropScreen(session);
     final pc = await _newPc();
-    final p = _Peer(session, sid, pc, roomType: 'screen');
+    final p = _Peer(
+      session,
+      sid,
+      pc,
+      roomType: 'screen',
+      broadcaster: _mesh ? session : null,
+    );
     _screens[session] = p;
     _wireIce(p, 'screen');
     pc.onConnectionState = (s) {
@@ -596,18 +656,25 @@ class Call extends ChangeNotifier {
   Future<void> _handleMeshMessage(Map<String, dynamic> data) async {
     if (_ended) return;
     final from = data['from'] as String?;
-    final peers = data['roomType'] == 'screen' ? _screens : _subs;
-    if (data['type'] == 'candidate' && data['sid'] != peers[from]?.sid) return;
+    final screen = data['roomType'] == 'screen';
+    final sid = data['sid'];
+    if (data['type'] == 'candidate' &&
+        (screen
+            ? sid != _screens[from]?.sid && sid != _sharing[from]?.sid
+            : sid != _subs[from]?.sid)) {
+      return;
+    }
     if (data['type'] != 'answer') return _onMessage({'data': data});
     try {
       final payload = data['payload'];
-      final p = _subs[from];
+      // An answer to an offer of the user's own screen, or of their camera.
+      final p = screen ? _sharing[from] : _subs[from];
       if (p == null || payload is! Map || data['sid'] != p.sid) return;
       await p.pc.setRemoteDescription(
         RTCSessionDescription(payload['sdp'] as String, 'answer'),
       );
       await p.flush();
-      log('peer: answer applied');
+      log(screen ? 'screen peer: answer applied' : 'peer: answer applied');
     } catch (e) {
       log('call: failed handling an answer: $e');
     }
@@ -644,10 +711,14 @@ class Call extends ChangeNotifier {
     for (final session in _meshKnown.toList()) {
       if (_meshUsers.containsKey(session)) continue;
       _meshKnown.remove(session);
+      unawaited(_dropSharing(session));
       unawaited(_dropSub(session).then((_) => _noteMeshCount()));
     }
     for (final entry in _meshUsers.entries) {
-      if (_meshKnown.add(entry.key)) unawaited(_connectMeshPeer(entry.key));
+      if (_meshKnown.add(entry.key)) {
+        unawaited(_connectMeshPeer(entry.key));
+        _sendScreenTo(entry.key);
+      }
     }
   }
 
@@ -770,6 +841,163 @@ class Call extends ChangeNotifier {
     return parts.join(', ');
   }
 
+  /// Opens the system's picker and shares what the user chooses. Returns a
+  /// message to show if it didn't work; cancelling isn't a failure.
+  Future<String?> shareScreen() async {
+    if (_ended || _capture != null || _sig.sessionId == null) return null;
+    final ScreenCapture capture;
+    try {
+      capture = await ScreenCapture.open();
+    } catch (e) {
+      log('screen share: couldn\'t start: ${e.runtimeType}');
+      return 'Couldn\'t start sharing your screen.';
+    }
+    _capture = capture;
+    choosingScreen = true;
+    notifyListeners();
+    final first = await capture.answer;
+    // Hung up or stopped while the picker was open.
+    if (!identical(_capture, capture)) return null;
+    choosingScreen = false;
+    if (first != ShareState.sharing) {
+      _capture = null;
+      notifyListeners();
+      await capture.close();
+      return first == ShareState.cancelled
+          ? null
+          : 'Couldn\'t share your screen.';
+    }
+    // Ended from the system: a closed window, or its own Stop.
+    unawaited(
+      capture.ended.then((_) {
+        if (identical(_capture, capture)) unawaited(stopSharing());
+      }),
+    );
+    notifyListeners();
+    try {
+      if (_mesh) {
+        _meshKnown.forEach(_sendScreenTo);
+      } else {
+        await _publishScreen(capture.stream);
+      }
+    } catch (e) {
+      log('screen share: sending failed: $e');
+      await stopSharing();
+      return 'Couldn\'t share your screen.';
+    }
+    return null;
+  }
+
+  Future<void> _publishScreen(MediaStream stream) async {
+    final pc = await _newPc();
+    final p = _screenPublisher = _Peer(
+      _sig.sessionId!,
+      _newSid(),
+      pc,
+      roomType: 'screen',
+    );
+    _wireIce(p, 'screen publisher');
+    for (final t in stream.getVideoTracks()) {
+      await pc.addTrack(t, stream);
+    }
+    final offer = await pc.createOffer({});
+    await pc.setLocalDescription(offer);
+    _sig.send(p.session, {
+      ..._base(p, 'offer'),
+      'payload': {'type': 'offer', 'sdp': offer.sdp, 'nick': api.creds.user},
+    });
+    log('screen publisher: offer sent');
+  }
+
+  /// Through a media server, asks it to offer the screen to [session], once
+  /// it has the screen. Directly, offers it from here.
+  void _sendScreenTo(String session) {
+    if (!sharingScreen || _ended) return;
+    if (_mesh) {
+      if (!_sharing.containsKey(session)) unawaited(_offerScreen(session));
+      return;
+    }
+    if (!_screenPublished || !_screenSentTo.add(session)) return;
+    _sig.send(session, {'type': 'sendoffer', 'roomType': 'screen'});
+    log('screen: asked the server to offer it (${session.hashCode})');
+  }
+
+  Future<void> _offerScreen(String session) async {
+    final capture = _capture;
+    if (capture == null) return;
+    try {
+      final pc = await _newPc();
+      final p = _Peer(
+        session,
+        _newSid(),
+        pc,
+        roomType: 'screen',
+        broadcaster: _sig.sessionId,
+      );
+      if (!identical(_capture, capture) || _sharing.containsKey(session)) {
+        await pc.close();
+        return;
+      }
+      _sharing[session] = p;
+      _wireIce(p, 'screen peer');
+      pc.onConnectionState = (s) {
+        log('screen peer: ${s.name}');
+        if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed &&
+            identical(_sharing[session], p)) {
+          unawaited(
+            _dropSharing(session).then((_) {
+              if (_meshKnown.contains(session)) _sendScreenTo(session);
+            }),
+          );
+        }
+      };
+      for (final t in capture.stream.getVideoTracks()) {
+        await pc.addTrack(t, capture.stream);
+      }
+      final offer = await pc.createOffer({});
+      await pc.setLocalDescription(offer);
+      _sig.send(session, {
+        ..._base(p, 'offer'),
+        'payload': {'type': 'offer', 'sdp': offer.sdp, 'nick': api.creds.user},
+      });
+      log('screen peer: offer sent');
+    } catch (e) {
+      log('screen peer: offering failed: $e');
+    }
+  }
+
+  Future<void> _dropSharing(String session) async {
+    final p = _sharing.remove(session);
+    await p?.pc.close();
+  }
+
+  /// Stops sharing and tells everyone, as the web client does.
+  Future<void> stopSharing() async {
+    final capture = _capture;
+    if (capture == null) return;
+    _capture = null;
+    choosingScreen = false;
+    notifyListeners();
+    if (_screenPublisher case final p?) {
+      // Through a media server, one message reaches the whole room.
+      final sig = _sig;
+      if (sig is Signaling) {
+        sig.sendToRoom({'type': 'unshareScreen', 'roomType': 'screen'});
+      }
+      _screenPublisher = null;
+      await p.pc.close();
+    }
+    _screenPublished = false;
+    _screenSentTo.clear();
+    for (final session in _sharing.keys.toList()) {
+      final p = _sharing[session]!;
+      _sig.send(session, _base(p, 'unshareScreen'));
+      await _dropSharing(session);
+    }
+    await capture.close();
+    log('screen share: stopped');
+  }
+
   Future<void> _dropSub(String session) async {
     _offerRetry.remove(session)?.cancel();
     // Someone who leaves stops sharing too.
@@ -808,6 +1036,7 @@ class Call extends ChangeNotifier {
       t.cancel();
     }
     _offerRetry.clear();
+    await stopSharing();
     for (final s in _subs.keys.toList()) {
       await _dropSub(s);
     }

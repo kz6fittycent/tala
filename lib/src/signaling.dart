@@ -89,6 +89,17 @@ class Signaling implements CallSignaling {
     }));
   }
 
+  /// To everyone in the room, such as a shared screen ending.
+  void sendToRoom(Map<String, dynamic> data) {
+    _ws?.add(jsonEncode({
+      'type': 'message',
+      'message': {
+        'recipient': {'type': 'room'},
+        'data': data,
+      },
+    }));
+  }
+
   Future<Map<String, dynamic>> _request(String type, Map<String, dynamic> body) {
     final id = '${_nextId++}';
     final c = Completer<Map<String, dynamic>>();

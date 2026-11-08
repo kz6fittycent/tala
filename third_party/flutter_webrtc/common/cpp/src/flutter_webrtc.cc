@@ -75,6 +75,22 @@ void FlutterWebRTC::HandleMethodCall(
     const EncodableMap constraints = findMap(params, "constraints");
 
     GetDisplayMedia(constraints, std::move(result));
+#ifdef __linux__
+  } else if (method_call.method_name().compare("getPortalDisplayMedia") == 0) {
+    const EncodableMap params =
+        method_call.arguments() ? GetValue<EncodableMap>(*method_call.arguments())
+                                : EncodableMap();
+    GetPortalDisplayMedia(findMap(params, "constraints"), std::move(result));
+  } else if (method_call.method_name().compare("stopPortalDisplayMedia") ==
+             0) {
+    if (!method_call.arguments()) {
+      result->Error("Bad Arguments", "streamId is required");
+      return;
+    }
+    const EncodableMap params =
+        GetValue<EncodableMap>(*method_call.arguments());
+    StopPortalDisplayMedia(findString(params, "streamId"), std::move(result));
+#endif
   } else if (method_call.method_name().compare("getDesktopSources") == 0) {
     // types: ["screen", "window"]
     if (!method_call.arguments()) {

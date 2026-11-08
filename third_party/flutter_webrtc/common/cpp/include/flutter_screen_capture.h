@@ -19,7 +19,16 @@
 #include "rtc_desktop_capturer.h"
 #include "rtc_desktop_media_list.h"
 
+#ifdef __linux__
+#include <map>
+#include <string>
+#endif
+
 namespace flutter_webrtc_plugin {
+
+#ifdef __linux__
+class PortalScreenCast;
+#endif
 
 class FlutterScreenCapture : public MediaListObserver,
                              public DesktopCapturerObserver {
@@ -40,6 +49,15 @@ class FlutterScreenCapture : public MediaListObserver,
                                  int width,
                                  int height,
                                  std::unique_ptr<MethodResultProxy> result);
+
+#ifdef __linux__
+  // Tala: one portal session per share, with its outcome sent as
+  // "portalScreenCast" events. See linux/portal_screencast.h.
+  void GetPortalDisplayMedia(const EncodableMap& constraints,
+                             std::unique_ptr<MethodResultProxy> result);
+  void StopPortalDisplayMedia(const std::string& stream_id,
+                              std::unique_ptr<MethodResultProxy> result);
+#endif
 
  protected:
   void OnMediaSourceAdded(scoped_refptr<MediaSource> source) override;
@@ -128,6 +146,11 @@ class FlutterScreenCapture : public MediaListObserver,
   std::unique_ptr<LoopbackCapturer> loopback_capturer_;
   // The custom audio source fed by the loopback capturer.
   scoped_refptr<RTCAudioSource> loopback_audio_source_;
+
+#ifdef __linux__
+  // Shares started by GetPortalDisplayMedia, by stream id. Platform thread.
+  std::map<std::string, std::unique_ptr<PortalScreenCast>> portal_captures_;
+#endif
 };
 
 }  // namespace flutter_webrtc_plugin
