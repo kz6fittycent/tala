@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -523,6 +524,9 @@ class _RoomsPageState extends State<RoomsPage> {
   /// The conversation in a call, if any, and whether its chat is showing.
   String? _callToken;
   bool _callChatOpen = false;
+
+  /// Unread messages in the call's conversation, for its closed chat button.
+  final ValueNotifier<int> _callUnread = ValueNotifier(0);
   Timer? _roomTimer;
   late final Presence _presence = Presence(
     heartbeat: widget.api.heartbeat,
@@ -634,6 +638,7 @@ class _RoomsPageState extends State<RoomsPage> {
         _rooms = rooms;
         _roomsError = null;
       });
+      _callUnread.value = _knownRoom(_callToken ?? '')?.unread ?? 0;
       _updateBadge();
     } catch (e) {
       log('rooms: $e');
@@ -928,6 +933,7 @@ class _RoomsPageState extends State<RoomsPage> {
   void dispose() {
     _drafts.flush();
     _presence.dispose();
+    _callUnread.dispose();
     FileDrops.instance.onUnwanted = null;
     newCrash.removeListener(_offerNewCrash);
     _tray.stop();
@@ -996,6 +1002,7 @@ class _RoomsPageState extends State<RoomsPage> {
       _callToken = room.token;
       _callChatOpen = widget.settings.callChatOpen;
     });
+    _callUnread.value = full.unread;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CallPage(
@@ -1004,6 +1011,7 @@ class _RoomsPageState extends State<RoomsPage> {
           answering: answering,
           settings: widget.settings,
           drafts: _drafts,
+          unread: _callUnread,
           onChatOpen: (open) => _callChatOpen = open,
         ),
       ),
@@ -1098,9 +1106,13 @@ class CallPage extends StatefulWidget {
     required this.settings,
     required this.drafts,
     required this.onChatOpen,
+    required this.unread,
   });
   final NcApi api;
   final Room room;
+
+  /// Shown on the chat button while the chat is closed.
+  final ValueListenable<int> unread;
 
   /// Someone is already ringing, so the caller's tone isn't wanted.
   final bool answering;
@@ -1234,14 +1246,26 @@ class _CallPageState extends State<CallPage> {
                         : Icons.screen_share),
                     onPressed: _call.choosingScreen ? null : _toggleScreen),
                 const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip: widget.settings.callChatOpen
-                        ? 'Hide chat'
-                        : 'Show chat',
-                    icon: Icon(widget.settings.callChatOpen
-                        ? Icons.chat
-                        : Icons.chat_outlined),
-                    onPressed: _toggleChat),
+                ValueListenableBuilder(
+                  valueListenable: widget.unread,
+                  builder: (context, unread, _) {
+                    final open = widget.settings.callChatOpen;
+                    final waiting = !open && unread > 0;
+                    return IconButton.filled(
+                      tooltip: open
+                          ? 'Hide chat'
+                          : waiting
+                          ? 'Show chat ($unread unread)'
+                          : 'Show chat',
+                      icon: Badge(
+                        isLabelVisible: waiting,
+                        label: Text('$unread'),
+                        child: Icon(open ? Icons.chat : Icons.chat_outlined),
+                      ),
+                      onPressed: _toggleChat,
+                    );
+                  },
+                ),
                 const SizedBox(width: 12),
                 IconButton.filled(
                     tooltip: 'Hang up',
