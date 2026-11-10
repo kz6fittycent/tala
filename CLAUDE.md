@@ -5,7 +5,7 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 Status and decisions are kept in this file.
 
 ## Where things stand (2026-11-10)
-0.6.1 is on stable (promoted 2026-11-07). On `main`, not yet released (pubspec still says 0.6.1): read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. Wiki edits for them are committed in a scratchpad clone only, not pushed.
+0.6.1 is on stable (promoted 2026-11-07). 0.7.0 (version set by hand; `bump_version.sh` would have given 0.6.2) was pushed to `main` for candidate on 2026-11-10 with: read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. Wiki edits for them are committed in a scratchpad clone only, not pushed.
 
 The user's direction (2026-11-10): untested areas (calls with more than three people, a real no-HPB server across networks, real federation) are left to reports from users in the field.
 
@@ -87,7 +87,7 @@ Typing `@` at a word's start lists matches from `GET chat/{token}/mentions` (wit
 ### Message search
 `lib/src/search.dart`: unified search (`search/providers/talk-message/search`), all conversations or one, 400ms pause, latest wins, "Show more" after a full page of 20. A result opens `MessageContextDialog` with up to 15 messages each side (`chat/{token}/{id}/context`) instead of jumping in the live chat, which could mean loading thousands of messages (my choice, flagged to the user). A server without `chat-get-context` shows "Couldn't load this message".
 
-### Added 2026-11-10 (on `main`, unreleased, nothing seen by the user yet)
+### Added 2026-11-10 (0.7.0, on candidate, not yet tested by the user)
 - Read ticks: `X-Chat-Last-Common-Read` from chat fetches (`chatLastCommonRead`). One tick sent, two read by everyone; members who joined through a group count, and the server omits the header when the user keeps read status private. Verified on Talk 25.0.7 by `group_check`.
 - `call_joined` and `call_left` system messages are hidden; "Call ended" already lists who and how long.
 - Drafts: `lib/src/drafts.dart`, `drafts.json`, mode 600, tied to `user@server`, saved a second after typing stops and on unfocus, quit and dispose.
