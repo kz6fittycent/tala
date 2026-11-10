@@ -10,6 +10,7 @@ import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 import 'mentions.dart';
+import 'polls.dart';
 import 'presence.dart';
 import 'search.dart';
 
@@ -747,6 +748,44 @@ class NcApi implements CallSource, ChatSource {
       'referenceId': referenceId,
     });
   }
+
+  static const _pollV1 = '/ocs/v2.php/apps/spreed/api/v1/poll';
+
+  Future<Poll> poll(String token, int id) async => Poll.fromJson(
+    ((await _ocs('GET', '$_pollV1/$token/$id')) as Map).cast(),
+  );
+
+  Future<Poll> votePoll(String token, int id, List<int> options) async =>
+      Poll.fromJson(
+        ((await _ocs('POST', '$_pollV1/$token/$id', body: {
+          'optionIds': options,
+        })) as Map).cast(),
+      );
+
+  Future<Poll> closePoll(String token, int id) async => Poll.fromJson(
+    ((await _ocs('DELETE', '$_pollV1/$token/$id')) as Map).cast(),
+  );
+
+  /// Hidden results show only once it closes. Multiple allows any number.
+  Future<void> createPoll(
+    String token,
+    String question,
+    List<String> options, {
+    required bool hidden,
+    required bool multiple,
+  }) => _ocs('POST', '$_pollV1/$token', body: {
+    'question': question,
+    'options': options,
+    'resultMode': hidden ? 1 : 0,
+    'maxVotes': multiple ? 0 : 1,
+  });
+
+  late final PollSource polls = PollSource(
+    load: poll,
+    vote: votePoll,
+    close: closePoll,
+    create: createPoll,
+  );
 
   static const _maxPreviewBytes = 20 * 1024 * 1024;
 

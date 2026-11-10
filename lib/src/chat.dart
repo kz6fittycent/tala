@@ -131,6 +131,13 @@ String editableText(String message, Map<String, dynamic> params) =>
       return p['name'] as String;
     });
 
+int? _pollIn(Map<String, dynamic> params) {
+  for (final p in params.values) {
+    if (p is Map && p['type'] == 'talk-poll') return int.tryParse('${p['id']}');
+  }
+  return null;
+}
+
 /// The server sends an empty JSON list instead of an empty object here.
 Map<String, dynamic> _map(Object? v) =>
     v is Map ? v.cast<String, dynamic>() : const {};
@@ -154,6 +161,7 @@ class ChatMessage {
     this.reactionsSelf = const [],
     this.editSource = '',
     this.blocks,
+    this.pollId,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) {
@@ -174,6 +182,7 @@ class ChatMessage {
           : parseMessage(raw, params),
       blocks: blocks,
       editSource: editableText(raw, params),
+      pollId: _pollIn(params),
       systemKind: j['systemMessage'] as String? ?? '',
       type: j['messageType'] as String? ?? 'comment',
       referenceId: j['referenceId'] as String? ?? '',
@@ -212,6 +221,9 @@ class ChatMessage {
   final List<String> reactionsSelf;
   final String editSource;
 
+  /// Set when this message is a poll, to open it by.
+  final int? pollId;
+
   String get text => segments.map((s) => s.text).join();
   bool get isSystem => systemKind.isNotEmpty || type == 'system';
   bool get isDeleted => type == 'comment_deleted';
@@ -231,6 +243,7 @@ class ChatMessage {
   /// Attachments are left out: only their caption could change, and Tala
   /// doesn't add captions.
   bool get canEdit =>
+      pollId == null &&
       type == 'comment' &&
       !isSystem &&
       segments.every((s) => s.kind != SegmentKind.file);
@@ -260,6 +273,7 @@ class ChatMessage {
       parentDeleted: parentDeleted,
       isReplyable: isReplyable,
       editSource: editSource,
+      pollId: pollId,
       reactions: counts,
       reactionsSelf: add
           ? [...reactionsSelf, emoji]

@@ -15,6 +15,7 @@ import 'log.dart';
 import 'markdown.dart';
 import 'mentions.dart';
 import 'nc_api.dart';
+import 'polls.dart';
 import 'presence.dart';
 import 'settings.dart';
 
@@ -547,9 +548,12 @@ class ConversationPane extends StatefulWidget {
     this.onMembers,
     this.onSearch,
     this.avatars,
+    this.polls,
     this.showHeader = true,
   });
 
+  /// Null leaves polls closed to opening or creating, as in tests.
+  final PollSource? polls;
   final ChatSource source;
   final Room room;
 
@@ -787,6 +791,36 @@ class _ConversationPaneState extends State<ConversationPane> {
     }
   }
 
+  Future<void> _openPoll(int id) => showDialog<void>(
+    context: context,
+    builder: (_) => PollDialog(
+      source: widget.polls!,
+      token: widget.room.token,
+      pollId: id,
+      selfId: widget.room.selfId,
+      isModerator: widget.room.isModerator,
+      canVote: widget.room.canChat,
+    ),
+  );
+
+  Future<void> _newPoll() async {
+    final polls = widget.polls!;
+    final token = widget.room.token;
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => CreatePollDialog(
+        create: (question, options, {required hidden, required multiple}) =>
+            polls.create(
+              token,
+              question,
+              options,
+              hidden: hidden,
+              multiple: multiple,
+            ),
+      ),
+    );
+  }
+
   Future<void> _attach() async {
     final files = await openFiles();
     for (final f in files) {
@@ -1002,6 +1036,11 @@ class _ConversationPaneState extends State<ConversationPane> {
               onKey: _onKey,
               onSend: _send,
               onAttach: _canUpload && _editing == null ? _attach : null,
+              // Talk takes polls in group and public conversations only.
+              onPoll:
+                  widget.polls != null && room.hasMembers && _editing == null
+                  ? _newPoll
+                  : null,
             ),
           ] else if (!room.canChat)
             const Padding(
@@ -1091,6 +1130,7 @@ class _ConversationPaneState extends State<ConversationPane> {
                 onEdit: () => _startEdit(m),
                 onDelete: () => _confirmDelete(m),
                 canModerate: widget.room.isModerator,
+                onOpenPoll: widget.polls == null ? null : _openPoll,
                 preview: (id) =>
                     _previews[id] ??= widget.source.chatPreview(id),
               ),
@@ -1219,8 +1259,10 @@ class _Composer extends StatelessWidget {
     required this.onKey,
     required this.onSend,
     required this.onAttach,
+    this.onPoll,
   });
   final VoidCallback? onAttach;
+  final VoidCallback? onPoll;
   final TextEditingController controller;
   final FocusNode focus;
   final FocusOnKeyEventCallback onKey;
@@ -1232,14 +1274,19 @@ class _Composer extends StatelessWidget {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (onAttach != null) ...[
+        if (onAttach != null)
           IconButton(
             tooltip: 'Attach files',
             icon: const Icon(Icons.attach_file),
             onPressed: onAttach,
           ),
-          const SizedBox(width: 4),
-        ],
+        if (onPoll != null)
+          IconButton(
+            tooltip: 'New poll',
+            icon: const Icon(Icons.poll_outlined),
+            onPressed: onPoll,
+          ),
+        if (onAttach != null || onPoll != null) const SizedBox(width: 4),
         Expanded(
           child: Focus(
             onKeyEvent: onKey,
@@ -1631,7 +1678,10 @@ class _MessageBubble extends StatefulWidget {
     required this.canModerate,
     required this.preview,
     this.readByAll,
+    this.onOpenPoll,
   });
+
+  final ValueChanged<int>? onOpenPoll;
 
   /// For the user's own messages, when the server reports read status.
   final bool? readByAll;
@@ -1731,11 +1781,19 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     segment: s,
                     bytes: widget.preview(s.previewFileId!),
                   ),
-              _MessageText(
-                message.segments,
-                blocks: message.blocks,
-                italic: message.isDeleted,
-              ),
+              if (message.pollId case final poll? when !message.isDeleted)
+                _PollCard(
+                  question: message.text,
+                  onOpen: widget.onOpenPoll == null
+                      ? null
+                      : () => widget.onOpenPoll!(poll),
+                )
+              else
+                _MessageText(
+                  message.segments,
+                  blocks: message.blocks,
+                  italic: message.isDeleted,
+                ),
               if (message.reactions.isNotEmpty)
                 _Reactions(
                   message: message,
@@ -1756,6 +1814,40 @@ class _MessageBubbleState extends State<_MessageBubble> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PollCard extends StatelessWidget {
+  const _PollCard({required this.question, required this.onOpen});
+  final String question;
+  final VoidCallback? onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.poll_outlined, size: 18, color: theme.colorScheme.primary),
+            const SizedBox(width: 6),
+            Text('Poll', style: theme.textTheme.labelMedium),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(question, style: const TextStyle(fontWeight: FontWeight.bold)),
+        if (onOpen != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: OutlinedButton(
+              onPressed: onOpen,
+              child: const Text('Open poll'),
+            ),
+          ),
+      ],
     );
   }
 }

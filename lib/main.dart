@@ -1073,6 +1073,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   onMembers: () => _showMembers(selected!),
                   onSearch: () => _search(room: selected),
                   avatars: widget.api.avatars,
+                  polls: widget.api.polls,
                 ),
         ),
       ),
@@ -1219,6 +1220,7 @@ class _CallPageState extends State<CallPage> {
                     drafts: widget.drafts,
                     showHeader: false,
                     avatars: widget.api.avatars,
+                    polls: widget.api.polls,
                     onBack: () {},
                     onCall: () {},
                   )

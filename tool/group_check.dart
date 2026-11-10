@@ -4,15 +4,18 @@
 //
 //   TALA_GROUP_CHECK_URL=http://127.0.0.1:8089 \
 //   TALA_GROUP_CHECK_PASSWORD_FOR_ALICE=... TALA_GROUP_CHECK_PASSWORD_FOR_BOB=... \
+//   TALA_GROUP_CHECK_PASSWORD_FOR_CAROL=... \
 //   flutter test tool/group_check.dart
 //
 // It isn't under test/, so the normal suite skips it. It logs in as alice, with
-// bob and carol as existing users, and refuses an https address, which would
+// bob and carol as existing users, carol also in a group named checkgroup,
+// and refuses an https address, which would
 // suggest a real server.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tala/src/chat.dart' show ApiException, SegmentKind;
+import 'package:tala/src/chat.dart'
+    show ApiException, SegmentKind, newReferenceId;
 import 'package:tala/src/mentions.dart';
 import 'package:tala/src/nc_api.dart';
 
@@ -191,5 +194,85 @@ void main() {
     );
     await alice.removeMember(token, guest.attendeeId);
     await alice.deleteConversation(token);
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('polls, read marks, status, groups and descriptions', () async {
+    final alice = as('alice', 'TALA_GROUP_CHECK_PASSWORD_FOR_ALICE');
+    final bob = as('bob', 'TALA_GROUP_CHECK_PASSWORD_FOR_BOB');
+    final token = await alice.createGroup('Extras check');
+    await alice.addMember(token, Person('bob', 'bob', ''));
+
+    // A whole group joins as one entry.
+    final groups = await alice.searchMembers('check');
+    stdout.writeln('member search: ${groups.map((p) => p.key).toList()}');
+    final group = groups.firstWhere((p) => p.key == 'groups:checkgroup');
+    await alice.addMember(token, group);
+    expect(
+      (await alice.members(token)).map((m) => m.key),
+      contains('groups:checkgroup'),
+    );
+
+    await alice.describeConversation(token, 'What this is for');
+    final room = (await alice.rooms()).firstWhere((r) => r.token == token);
+    expect(room.description, 'What this is for');
+
+    // Read marks: bob reading alice's message moves the common read point.
+    final sent = await alice.chatSend(token, 'read me', newReferenceId());
+    await alice.chatHistory(token);
+    stdout.writeln('common read before: ${alice.chatLastCommonRead(token)}');
+    await bob.chatMarkRead(token, sent.id);
+    await alice.chatHistory(token);
+    // carol, in through the group, hasn't read it, so it isn't read by all.
+    expect(alice.chatLastCommonRead(token), lessThan(sent.id));
+    await as('carol', 'TALA_GROUP_CHECK_PASSWORD_FOR_CAROL')
+        .chatMarkRead(token, sent.id);
+    await alice.chatHistory(token);
+    final common = alice.chatLastCommonRead(token);
+    stdout.writeln('common read after: $common, message ${sent.id}');
+    expect(common, greaterThanOrEqualTo(sent.id));
+
+    // Polls.
+    await alice.createPoll(token, 'Where to?', ['Lake', 'Hills'],
+        hidden: false, multiple: false);
+    final history = await bob.chatHistory(token);
+    final pollMessage = history.firstWhere((m) => m.pollId != null);
+    expect(pollMessage.text, 'Where to?');
+    final id = pollMessage.pollId!;
+    var poll = await bob.poll(token, id);
+    expect(poll.options, ['Lake', 'Hills']);
+    expect(poll.voted, isFalse);
+    poll = await bob.votePoll(token, id, [1]);
+    expect(poll.votedSelf, [1]);
+    expect(poll.votes, {1: 1});
+    await expectLater(bob.closePoll(token, id), throwsA(isA<ApiException>()));
+    poll = await alice.closePoll(token, id);
+    expect(poll.closed, isTrue);
+    expect(poll.showsResults, isTrue);
+
+    final hiddenToken = token;
+    await alice.createPoll(hiddenToken, 'Secret?', ['Yes', 'No'],
+        hidden: true, multiple: true);
+    final secret = (await bob.chatHistory(token))
+        .where((m) => m.pollId != null)
+        .reduce((a, b) => a.id > b.id ? a : b);
+    poll = await bob.votePoll(token, secret.pollId!, [0, 1]);
+    stdout.writeln('hidden poll after voting: votes ${poll.votes}');
+    expect(poll.maxVotes, 0);
+    expect(poll.showsResults, isFalse);
+
+    // Status.
+    final beat = await alice.heartbeat(away: false);
+    stdout.writeln('heartbeat: ${beat?.type}');
+    await alice.setStatus('dnd');
+    expect((await alice.ownStatus()).type, 'dnd');
+    final one = await bob.startOneToOne('alice');
+    final withAlice = (await bob.rooms()).firstWhere((r) => r.token == one);
+    stdout.writeln('one-to-one status: ${withAlice.status?.type}');
+    expect(withAlice.status?.type, 'dnd');
+    await alice.setStatus('online');
+
+    await alice.deleteConversation(token);
+    // Cleanup only; a one-to-one may already be gone for one side.
+    await bob.leaveConversation(one).catchError((Object _) {});
   }, skip: skip, timeout: const Timeout(Duration(minutes: 2)));
 }
