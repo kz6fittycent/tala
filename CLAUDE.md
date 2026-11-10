@@ -5,7 +5,7 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 Status and decisions are kept in this file.
 
 ## Where things stand (2026-11-10)
-0.6.1 is on stable (promoted 2026-11-07). 0.7.0 (version set by hand; `bump_version.sh` would have given 0.6.2) was pushed to `main` for candidate on 2026-11-10 with: read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. Wiki edits for them are committed in a scratchpad clone only, not pushed.
+0.6.1 is on stable (promoted 2026-11-07). 0.7.0 (version set by hand; `bump_version.sh` would have given 0.6.2) was pushed to `main` for candidate on 2026-11-10 with: read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. The wiki was updated for them the same day.
 
 The user's direction (2026-11-10): untested areas (calls with more than three people, a real no-HPB server across networks, real federation) are left to reports from users in the field.
 
