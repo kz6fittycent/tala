@@ -8,6 +8,7 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "file_drop.h"
 #include "keyring.h"
 #include "tray.h"
 
@@ -17,6 +18,7 @@ struct _MyApplication {
   GtkWindow* window;
   Tray* tray;
   Keyring* keyring;
+  FileDrop* file_drop;
   // In a snap, what a second launch connects to (see claim_snap_instance).
   GSocketService* snap_instance;
   // Started at login: stay in the tray rather than opening a window.
@@ -125,6 +127,7 @@ static void my_application_activate(GApplication* application) {
 
   self->tray = tray_new(GTK_APPLICATION(application), window, view);
   self->keyring = keyring_new(view);
+  self->file_drop = file_drop_new(view);
   if (self->start_hidden) {
     g_timeout_add_seconds(kTrayWaitSeconds, tray_wait_cb, self);
   }
@@ -246,6 +249,7 @@ static void my_application_dispose(GObject* object) {
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_pointer(&self->tray, tray_free);
   g_clear_pointer(&self->keyring, keyring_free);
+  g_clear_pointer(&self->file_drop, file_drop_free);
   g_clear_object(&self->snap_instance);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }

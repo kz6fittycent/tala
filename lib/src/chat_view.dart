@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'chat.dart';
 import 'drafts.dart';
+import 'file_drop.dart';
 import 'log.dart';
 import 'markdown.dart';
 import 'mentions.dart';
@@ -689,6 +690,7 @@ class _ConversationPaneState extends State<ConversationPane> {
       ..active = state == null || state == AppLifecycleState.resumed
       ..start();
     _scroll.addListener(_onScroll);
+    FileDrops.instance.addTarget(_onDrop);
     _input.addListener(_updateMention);
     _input.addListener(() {
       if (_editing == null) widget.drafts[widget.room.token] = _input.text;
@@ -784,6 +786,25 @@ class _ConversationPaneState extends State<ConversationPane> {
     }
   }
 
+  Future<void> _onDrop(List<String> paths) async {
+    if (!_canUpload || _editing != null) {
+      _notify(_editing != null
+          ? 'Finish editing before sending files.'
+          : 'Files can\'t be sent in this conversation.');
+      return;
+    }
+    final (:files, :skipped) = sendableFiles(paths);
+    if (skipped > 0) {
+      _notify(skipped == 1
+          ? 'Folders can\'t be sent, only files.'
+          : '$skipped items weren\'t files and were skipped.');
+    }
+    if (_scroll.hasClients && files.isNotEmpty) _scroll.jumpTo(0);
+    for (final f in files) {
+      await _thread.sendFile(f);
+    }
+  }
+
   void _onLifecycle(AppLifecycleState state) =>
       _thread.active = state == AppLifecycleState.resumed;
 
@@ -838,6 +859,7 @@ class _ConversationPaneState extends State<ConversationPane> {
 
   @override
   void dispose() {
+    FileDrops.instance.removeTarget(_onDrop);
     _lifecycle.dispose();
     _thread.dispose();
     _mentionTimer?.cancel();
@@ -851,6 +873,22 @@ class _ConversationPaneState extends State<ConversationPane> {
   Widget build(BuildContext context) {
     final room = widget.room;
     final twoPane = MediaQuery.sizeOf(context).width >= _twoPaneWidth;
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        _content(context, room, twoPane),
+        ValueListenableBuilder(
+          valueListenable: FileDrops.instance.hovering,
+          builder: (context, hovering, _) =>
+              hovering && _canUpload && FileDrops.instance.isCurrent(_onDrop)
+              ? Positioned.fill(child: _DropHint(room.name))
+              : const Positioned(left: 0, top: 0, child: SizedBox.shrink()),
+        ),
+      ],
+    );
+  }
+
+  Widget _content(BuildContext context, Room room, bool twoPane) {
     return ListenableBuilder(
       listenable: _thread,
       builder: (context, _) => Column(
@@ -1046,6 +1084,41 @@ class _ConversationPaneState extends State<ConversationPane> {
       );
     }
     return out;
+  }
+}
+
+/// Over the conversation while files are dragged across it.
+class _DropHint extends StatelessWidget {
+  const _DropHint(this.name);
+  final String name;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return IgnorePointer(
+      child: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: scheme.surface.withValues(alpha: 0.9),
+          border: Border.all(color: scheme.primary, width: 2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.upload_file, size: 48, color: scheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              'Drop to send to $name',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

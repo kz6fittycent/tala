@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
 import 'package:tala/src/drafts.dart';
+import 'package:tala/src/file_drop.dart';
 import 'package:tala/src/mentions.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
@@ -1015,6 +1016,31 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
     }
+
+    testWidgets('dropped files upload, folders are skipped, with a hint while '
+        'dragging', (tester) async {
+      wide(tester);
+      final dir = Directory.systemTemp.createTempSync('tala-drop');
+      final file = File('${dir.path}/notes.txt')..writeAsStringSync('x');
+      final src = FakeSource()..history = (_) => [msg(1)];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      FileDrops.instance.hovering.value = true;
+      await tester.pump();
+      expect(find.text('Drop to send to Family'), findsOneWidget);
+      FileDrops.instance.hovering.value = false;
+      await tester.pump();
+      expect(find.text('Drop to send to Family'), findsNothing);
+      await tester.runAsync(() async {
+        FileDrops.instance.deliver([file.path, dir.path]);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      expect(src.uploads, [file.path]);
+      expect(find.text('Folders can\'t be sent, only files.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      expect(FileDrops.instance.hasTarget, isFalse);
+    });
 
     testWidgets('own messages show sent, then read once everyone has',
         (tester) async {

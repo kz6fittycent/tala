@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME}
   "my_application.cc"
   "tray.cc"
   "keyring.cc"
+  "file_drop.cc"
   "fatal_signal.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )

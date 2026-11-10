@@ -16,6 +16,7 @@ import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
 import 'src/desktop_notify.dart';
 import 'src/drafts.dart';
+import 'src/file_drop.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
@@ -599,6 +600,12 @@ class _RoomsPageState extends State<RoomsPage> {
     widget.api
       ..onChatNotes = _alerts.update
       ..onConversationRead = _alerts.conversationRead;
+    FileDrops.instance.onUnwanted = (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Open a conversation to send files.')),
+      );
+    };
     _incoming.addListener(_onIncomingChanged);
     _incoming.start();
     newCrash.addListener(_offerNewCrash);
@@ -912,6 +919,7 @@ class _RoomsPageState extends State<RoomsPage> {
   @override
   void dispose() {
     _drafts.flush();
+    FileDrops.instance.onUnwanted = null;
     newCrash.removeListener(_offerNewCrash);
     _tray.stop();
     _lifecycle.dispose();
