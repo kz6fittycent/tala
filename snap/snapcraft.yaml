@@ -18,6 +18,7 @@ description: |
     sudo snap connect tala:password-manager-service
     sudo snap connect tala:camera
     sudo snap connect tala:audio-record
+    sudo snap connect tala:removable-media
 
   Help: https://github.com/kz6fittycent/tala/wiki
 
@@ -58,6 +59,7 @@ apps:
       - home
       # The tray icon and the dock's message count.
       - unity7
+      - removable-media
 
 parts:
   tala:

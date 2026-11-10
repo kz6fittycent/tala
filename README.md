@@ -57,10 +57,12 @@ Then connect the permissions it needs, once:
 sudo snap connect tala:password-manager-service
 sudo snap connect tala:camera
 sudo snap connect tala:audio-record
+sudo snap connect tala:removable-media
 ```
 
-Tala needs the first to save your sign-in, the second for video and the third
-for your microphone.
+Tala needs the first to save your sign-in, the second for video, the third for
+your microphone and the last to send files dragged from USB drives and other
+disks.
 
 ## Screenshots
 
