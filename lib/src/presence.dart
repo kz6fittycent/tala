@@ -132,8 +132,9 @@ class Presence extends ChangeNotifier {
     _focused = focused;
     if (!focused) _leftAt = _now();
     _timer = Timer.periodic(interval, (_) => _beat());
-    _beat();
-    refresh();
+    // After the beat: the server makes a status for someone who has none on
+    // their first heartbeat, and until then reading it is a 404.
+    _beat().then((_) => refresh());
   }
 
   /// Coming back sends at once, so others see the change without waiting.
@@ -168,8 +169,12 @@ class Presence extends ChangeNotifier {
     try {
       own = await fetchOwn();
       notifyListeners();
+    } on ApiException catch (e) {
+      // "No status for the current user", not a missing app: only a heartbeat
+      // 404 means that.
+      if (e.status != 404) log('status: reading status failed: $e');
     } catch (e) {
-      _failed(e, 'reading status');
+      log('status: reading status failed: $e');
     }
   }
 

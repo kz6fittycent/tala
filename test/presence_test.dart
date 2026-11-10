@@ -10,6 +10,7 @@ void main() {
     late List<bool> beats;
     late DateTime now;
     Object? beatError;
+    Object? fetchError;
 
     Presence make() => Presence(
       heartbeat: ({required bool away}) async {
@@ -18,7 +19,11 @@ void main() {
         beats.add(away);
         return UserStatus(away ? 'away' : 'online');
       },
-      fetchOwn: () async => const UserStatus('online'),
+      fetchOwn: () async {
+        final e = fetchError;
+        if (e != null) throw e;
+        return const UserStatus('online');
+      },
       setOwn: (_) async {},
       now: () => now,
     );
@@ -27,6 +32,7 @@ void main() {
       beats = [];
       now = DateTime(2026);
       beatError = null;
+      fetchError = null;
     });
 
     test('online while focused, away after five unfocused minutes', () {
@@ -52,6 +58,19 @@ void main() {
         final p = make()..start(focused: true);
         p.focusChanged(false);
         now = now.add(const Duration(minutes: 2));
+        async.elapse(const Duration(minutes: 5));
+        expect(beats, [false, false]);
+        p.dispose();
+      });
+    });
+
+    test('no status of one\'s own yet doesn\'t turn presence off', () {
+      fakeAsync((async) {
+        fetchError = ApiException(404, 'No status for the current user');
+        final p = make()..start(focused: true);
+        async.flushMicrotasks();
+        expect(p.available, isTrue);
+        expect(p.own?.type, 'online');
         async.elapse(const Duration(minutes: 5));
         expect(beats, [false, false]);
         p.dispose();
