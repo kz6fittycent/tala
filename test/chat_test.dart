@@ -1042,6 +1042,28 @@ void main() {
       expect(FileDrops.instance.hasTarget, isFalse);
     });
 
+    testWidgets('a dropped file Tala can\'t read is never queued',
+        (tester) async {
+      wide(tester);
+      final dir = Directory.systemTemp.createTempSync('tala-drop');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final locked = File('${dir.path}/locked.jpg')..writeAsStringSync('x');
+      final ok = File('${dir.path}/ok.txt')..writeAsStringSync('x');
+      await tester.runAsync(() => Process.run('chmod', ['000', locked.path]));
+      final src = FakeSource()..history = (_) => [msg(1)];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await tester.runAsync(() async {
+        FileDrops.instance.deliver([locked.path, ok.path]);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      expect(src.uploads, [ok.path]);
+      expect(find.text('Tala isn\'t allowed to open that file. Try the attach '
+          'button.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('More… in the reaction menu opens the full picker',
         (tester) async {
       wide(tester);

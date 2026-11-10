@@ -5,7 +5,7 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 Status and decisions are kept in this file.
 
 ## Where things stand (2026-11-10)
-0.6.1 is on stable (promoted 2026-11-07). 0.7.0 (version set by hand; `bump_version.sh` would have given 0.6.2) was pushed to `main` for candidate on 2026-11-10 with: read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. The wiki was updated for them the same day.
+0.6.1 is on stable (promoted 2026-11-07). 0.7.0 (version set by hand; `bump_version.sh` would have given 0.6.2) went to candidate on 2026-11-10 with: read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence (heartbeat, status dots, own status, Do not disturb holding popups), an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions and polls. See "Added 2026-11-10" below. The wiki was updated for them the same day. 0.7.1 fixes drag and drop in the snap (see Snap).
 
 The user's direction (2026-11-10): untested areas (calls with more than three people, a real no-HPB server across networks, real federation) are left to reports from users in the field.
 
@@ -46,7 +46,7 @@ Licenses: `LICENSE` holds the AGPL v3 text, then a section stating or-later and 
 ## Snap
 `snap/snapcraft.yaml`: core24, `extensions: [gnome]` (the user's choice), Ubuntu 24.04 with clang, Ubuntu's dev packages, the extension's SDK variables cleared. Confinement facts from AppArmor profiles on skyfire: `unity7` allows the ayatana tray and the dock signal; `audio-playback` has no PipeWire rule, so a snap rings with `paplay`; the dock URI is `application://<instance>_tala.desktop`; start at login writes `$SNAP_USER_DATA/.config/autostart/tala.desktop` through the `autostart:` key. A second launch finds the running copy through an abstract socket (`claim_snap_instance` in `my_application.cc`), because a dbus slot needs a human store review. The host OS can't be read without `system-observe`, so reports use a `Kernel:` fact.
 
-Confirmed working from the snap by the user: sign-in, keyring, two-way calls, screen share, file picker, links, chime, ringback, start at login. Not checked in a snap: drag and drop (files outside home would need `removable-media` or similar).
+Confirmed working from the snap by the user: sign-in, keyring, two-way calls, screen share, file picker, links, chime, ringback, start at login. Drag and drop on 0.7.0 reached Tala but the file couldn't be read (permission denied in `~/Pictures`): the snap had no `home` plug, and the drop asked for `text/uri-list` before the document portal. 0.7.1 adds `home` and puts the portal targets (`application/vnd.portal.filetransfer`, `application/vnd.portal.files`) first, so drops from outside home should work too; dropped files Tala can't open are refused with a message instead of queued. Not yet rechecked.
 
 ## Calls
 `lib/src/call.dart`, `call_layout.dart`, `signaling.dart`, `internal_signaling.dart`. External signaling (HPB) and internal signaling (mesh) both work; the user confirmed normal HPB calls on 0.3.1 and two-way calls to browsers, phones and other Talas.

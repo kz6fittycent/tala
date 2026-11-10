@@ -52,6 +52,10 @@ apps:
       - audio-record
       - camera
       - password-manager-service
+      # Files dropped from the file manager arrive as plain paths; the
+      # attach button's picker goes through the document portal instead.
+      # Outside home, drops rely on the portal (linux/runner/file_drop.cc).
+      - home
       # The tray icon and the dock's message count.
       - unity7
 

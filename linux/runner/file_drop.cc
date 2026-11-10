@@ -3,6 +3,18 @@
 // Flutter has no file drops on Linux, so the view is made a GTK drop target.
 // Only local files are passed on: a URI with no local path (a web link, a
 // remote share) is skipped.
+//
+// The document portal's targets come first. A snap can't read most of the
+// user's files, so a plain text/uri-list path fails with permission denied;
+// through the portal, the file manager hands the files over and
+// gtk_selection_data_get_uris returns /run/user/<uid>/doc/... paths the snap
+// can open. GTK's own gtk_drag_dest_add_uri_targets lists text/uri-list first,
+// and the first target both sides know is the one asked for.
+static const GtkTargetEntry kTargets[] = {
+    {const_cast<gchar*>("application/vnd.portal.filetransfer"), 0, 0},
+    {const_cast<gchar*>("application/vnd.portal.files"), 0, 0},
+    {const_cast<gchar*>("text/uri-list"), 0, 0},
+};
 
 struct _FileDrop {
   FlMethodChannel* channel;
@@ -65,9 +77,8 @@ FileDrop* file_drop_new(FlView* view) {
       fl_method_channel_new(messenger, "tala/drop", FL_METHOD_CODEC(codec));
   drop->widget = GTK_WIDGET(view);
 
-  gtk_drag_dest_set(drop->widget, GTK_DEST_DEFAULT_DROP, nullptr, 0,
-                    GDK_ACTION_COPY);
-  gtk_drag_dest_add_uri_targets(drop->widget);
+  gtk_drag_dest_set(drop->widget, GTK_DEST_DEFAULT_DROP, kTargets,
+                    G_N_ELEMENTS(kTargets), GDK_ACTION_COPY);
   g_signal_connect(drop->widget, "drag-motion", G_CALLBACK(drag_motion_cb),
                    drop);
   g_signal_connect(drop->widget, "drag-leave", G_CALLBACK(drag_leave_cb),

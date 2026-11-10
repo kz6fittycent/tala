@@ -835,8 +835,13 @@ class _ConversationPaneState extends State<ConversationPane> {
           : 'Files can\'t be sent in this conversation.');
       return;
     }
-    final (:files, :skipped) = sendableFiles(paths);
-    if (skipped > 0) {
+    final (:files, :skipped, :unreadable) = sendableFiles(paths);
+    if (unreadable > 0) {
+      _notify(unreadable == 1
+          ? 'Tala isn\'t allowed to open that file. Try the attach button.'
+          : 'Tala isn\'t allowed to open $unreadable of those files. '
+              'Try the attach button.');
+    } else if (skipped > 0) {
       _notify(skipped == 1
           ? 'Folders can\'t be sent, only files.'
           : '$skipped items weren\'t files and were skipped.');

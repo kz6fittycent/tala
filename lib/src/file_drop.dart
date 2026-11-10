@@ -60,11 +60,33 @@ class FileDrops {
   }
 }
 
-/// Folders and anything else that isn't a plain file can't be attached.
-({List<String> files, int skipped}) sendableFiles(List<String> paths) {
-  final files = [
-    for (final p in paths)
-      if (FileSystemEntity.typeSync(p) == FileSystemEntityType.file) p,
-  ];
-  return (files: files, skipped: paths.length - files.length);
+/// Folders and anything else that isn't a plain file can't be attached, and
+/// neither can a file Tala isn't allowed to read (the snap's confinement, when
+/// a drop didn't come through the document portal).
+({List<String> files, int skipped, int unreadable}) sendableFiles(
+  List<String> paths,
+) {
+  final files = <String>[];
+  var skipped = 0;
+  var unreadable = 0;
+  for (final p in paths) {
+    if (FileSystemEntity.typeSync(p) != FileSystemEntityType.file) {
+      skipped++;
+    } else if (!_readable(p)) {
+      unreadable++;
+    } else {
+      files.add(p);
+    }
+  }
+  return (files: files, skipped: skipped, unreadable: unreadable);
+}
+
+bool _readable(String path) {
+  try {
+    File(path).openSync().closeSync();
+    return true;
+  } on FileSystemException catch (e) {
+    log('drop: can\'t read a dropped file: ${e.osError?.message ?? e.message}');
+    return false;
+  }
 }
