@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'chat.dart';
 import 'drafts.dart';
+import 'emoji_picker.dart';
 import 'file_drop.dart';
 import 'log.dart';
 import 'markdown.dart';
@@ -1431,6 +1432,7 @@ class _Bubble extends StatelessWidget {
 }
 
 const _quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+const _moreReactions = '';
 
 /// Shows while the pointer is over the message or a button here has keyboard
 /// focus, and always holds its space so messages don't shift.
@@ -1476,10 +1478,18 @@ class _MessageActionsState extends State<_MessageActions> {
               iconSize: 18,
               padding: EdgeInsets.zero,
               icon: const Icon(Icons.add_reaction_outlined),
-              onSelected: widget.onReact,
+              onSelected: (e) async {
+                if (e != _moreReactions) return widget.onReact!(e);
+                final picked = await showEmojiPicker(context);
+                if (picked != null) widget.onReact?.call(picked);
+              },
               itemBuilder: (context) => [
                 for (final e in _quickReactions)
                   PopupMenuItem(value: e, child: Text(e)),
+                const PopupMenuItem(
+                  value: _moreReactions,
+                  child: Text('More…'),
+                ),
               ],
             ),
           // The same menu as right-click, reachable from the keyboard.

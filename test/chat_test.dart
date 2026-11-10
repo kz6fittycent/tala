@@ -1042,6 +1042,23 @@ void main() {
       expect(FileDrops.instance.hasTarget, isFalse);
     });
 
+    testWidgets('More… in the reaction menu opens the full picker',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'bob', 'theirs')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Add a reaction'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('More…'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('🤔'));
+      await tester.pumpAndSettle();
+      expect(src.reacted, ['+🤔']);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('own messages show sent, then read once everyone has',
         (tester) async {
       wide(tester);
