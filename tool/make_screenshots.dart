@@ -95,6 +95,8 @@ class _DemoSource implements ChatSource {
   @override
   Future<void> chatMarkRead(String t, int id) async {}
   @override
+  int? chatLastCommonRead(String t) => 104;
+  @override
   Future<void> chatReact(
     String t,
     int m,

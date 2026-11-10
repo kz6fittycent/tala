@@ -305,6 +305,11 @@ class NcApi implements CallSource, ChatSource {
   static const _talkV3 = '/ocs/v2.php/apps/spreed/api/v3';
   static const _chatV1 = '/ocs/v2.php/apps/spreed/api/v1/chat';
 
+  final Map<String, int> _lastCommonRead = {};
+
+  @override
+  int? chatLastCommonRead(String token) => _lastCommonRead[token];
+
   /// Reading never moves the read marker or clears notifications here; that
   /// happens only through [chatMarkRead].
   Future<List<ChatMessage>> _chatGet(String token, Map<String, String> query,
@@ -323,6 +328,10 @@ class NcApi implements CallSource, ChatSource {
     try {
       final res = await req.close().timeout(timeout);
       final text = await res.transform(utf8.decoder).join().timeout(timeout);
+      final common = int.tryParse(
+        res.headers.value('x-chat-last-common-read') ?? '',
+      );
+      if (common != null) _lastCommonRead[token] = common;
       if (res.statusCode == 304) return const [];
       if (res.statusCode >= 300) throw ApiException(res.statusCode, path);
       final data = (jsonDecode(text) as Map)['ocs']?['data'];

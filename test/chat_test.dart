@@ -138,6 +138,11 @@ class FakeSource implements ChatSource {
 
   @override
   Future<void> chatMarkRead(String token, int id) async => marked.add(id);
+
+  int? lastCommonRead;
+
+  @override
+  int? chatLastCommonRead(String token) => lastCommonRead;
 }
 
 Future<void> settle() => Future<void>.delayed(Duration.zero);
@@ -961,6 +966,42 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
     }
+
+    testWidgets('own messages show sent, then read once everyone has',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()
+        ..lastCommonRead = 1
+        ..history = (_) => [
+              json(1, 'me', 'first'),
+              json(2, 'me', 'second'),
+              json(3, 'bob', 'theirs'),
+            ];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      expect(find.byTooltip('Read'), findsOneWidget);
+      expect(find.byTooltip('Sent'), findsOneWidget);
+      src.lastCommonRead = 3;
+      src.waits.last.complete([]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Read'), findsNWidgets(2));
+      expect(find.byTooltip('Sent'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      // The poll's pause after an empty answer.
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('no marks when the server keeps read status private',
+        (tester) async {
+      wide(tester);
+      final src = FakeSource()..history = (_) => [json(1, 'me', 'first')];
+      await tester.pumpWidget(pane(src, room()));
+      await tester.pump();
+      expect(find.byTooltip('Read'), findsNothing);
+      expect(find.byTooltip('Sent'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
 
     testWidgets('right-click on your own message offers edit and delete',
         (tester) async {

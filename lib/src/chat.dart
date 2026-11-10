@@ -309,6 +309,11 @@ abstract class ChatSource {
 
   /// Who can be mentioned here whose name matches [search], which may be empty.
   Future<List<MentionOption>> chatMentions(String token, String search);
+
+  /// The newest message everyone has read, from the last fetch of [token].
+  /// Null when the server doesn't say, which it doesn't if the user keeps
+  /// their own read status private.
+  int? chatLastCommonRead(String token);
 }
 
 enum SendState { sending, failed }
@@ -375,6 +380,17 @@ class ChatThread extends ChangeNotifier {
   bool loading = true;
   bool hasOlder = true;
 
+  /// Own messages up to this one have been read by everyone. Null if unknown.
+  int? lastCommonRead;
+
+  /// Whether the read point moved; the caller notifies.
+  bool _takeLastCommonRead() {
+    final got = _source.chatLastCommonRead(token);
+    if (got == null || got == lastCommonRead) return false;
+    lastCommonRead = got;
+    return true;
+  }
+
   /// Set while the connection is failing; retries continue underneath.
   String? problem;
 
@@ -438,6 +454,7 @@ class ChatThread extends ChangeNotifier {
         final got = await _source.chatHistory(token);
         if (_disposed) return;
         _ingestHistory(got);
+        _takeLastCommonRead();
         if (got.isEmpty) hasOlder = false;
         loading = false;
         problem = null;
@@ -464,7 +481,8 @@ class ChatThread extends ChangeNotifier {
           _ingestLive(got);
           _markReadIfActive();
         }
-        if (got.isNotEmpty || recovered) _changed();
+        final readMoved = _takeLastCommonRead();
+        if (got.isNotEmpty || recovered || readMoved) _changed();
         // A server that answers instantly shouldn't turn this into a spin.
         if (got.isEmpty && clock.elapsed < minPollGap) {
           await Future<void>.delayed(minPollGap);

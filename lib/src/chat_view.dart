@@ -980,6 +980,7 @@ class _ConversationPaneState extends State<ConversationPane> {
     }
     final messages = _thread.messages;
     final selfId = widget.room.selfId;
+    final readUpTo = _thread.lastCommonRead;
     for (var i = messages.length - 1; i >= 0; i--) {
       final m = messages[i];
       final prev = i > 0 ? messages[i - 1] : null;
@@ -997,6 +998,7 @@ class _ConversationPaneState extends State<ConversationPane> {
             : _MessageBubble(
                 message: m,
                 own: m.actorType == 'users' && m.actorId == selfId,
+                readByAll: readUpTo == null ? null : m.id <= readUpTo,
                 showName: !grouped,
                 // A one-to-one's header already says who this is.
                 avatar: !widget.room.hasMembers
@@ -1514,7 +1516,11 @@ class _MessageBubble extends StatefulWidget {
     required this.onDelete,
     required this.canModerate,
     required this.preview,
+    this.readByAll,
   });
+
+  /// For the user's own messages, when the server reports read status.
+  final bool? readByAll;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final bool canModerate;
@@ -1623,13 +1629,40 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 ),
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  message.edited ? '$time · edited' : time,
-                  style: small,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(message.edited ? '$time · edited' : time, style: small),
+                    if (widget.own && widget.readByAll != null)
+                      _ReadMark(read: widget.readByAll!),
+                  ],
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One tick when sent, two once everyone in the conversation has read it, as
+/// in the official clients.
+class _ReadMark extends StatelessWidget {
+  const _ReadMark({required this.read});
+  final bool read;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Tooltip(
+        message: read ? 'Read' : 'Sent',
+        child: Icon(
+          read ? Icons.done_all : Icons.done,
+          size: 14,
+          color: read ? scheme.primary : scheme.onSurfaceVariant,
+          semanticLabel: read ? 'Read' : 'Sent',
         ),
       ),
     );
