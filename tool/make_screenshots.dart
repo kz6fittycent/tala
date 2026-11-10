@@ -22,6 +22,7 @@ import 'package:tala/src/groups.dart';
 import 'package:tala/src/mentions.dart';
 import 'package:tala/src/search.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/drafts.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
@@ -225,7 +226,7 @@ Widget _main() {
       conversation: ConversationPane(
         source: _DemoSource(),
         room: _hike,
-        drafts: {},
+        drafts: _drafts(),
         onBack: () {},
         onCall: () {},
         onSearch: () {},
@@ -432,7 +433,7 @@ void main() {
               }),
             ],
             room: _hike,
-            drafts: {},
+            drafts: _drafts(),
             onBack: () {},
             onCall: () {},
           ),
@@ -629,3 +630,10 @@ void main() {
     );
   });
 }
+
+/// Throwaway, so screenshots never read or write real drafts.
+DraftStore _drafts() => DraftStore(
+  account: 'demo',
+  file: File('${Directory.systemTemp.createTempSync('tala-shots').path}/d.json'),
+  saveDelay: Duration.zero,
+);

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/chat_view.dart';
+import 'package:tala/src/drafts.dart';
 import 'package:tala/src/mentions.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
@@ -30,6 +31,15 @@ ChatMessage msg(int id,
       systemKind: system,
       referenceId: ref,
       parent: parent,
+    );
+
+/// Saves at once to a throwaway file, so no timer outlives a test.
+DraftStore testDrafts({File? file, String account = 'me@https://cloud'}) =>
+    DraftStore(
+      account: account,
+      file: file ??
+          File('${Directory.systemTemp.createTempSync('tala-drafts').path}/d.json'),
+      saveDelay: Duration.zero,
     );
 
 class FakeSource implements ChatSource {
@@ -644,7 +654,7 @@ void main() {
             body: ConversationPane(
               source: src,
               room: r,
-              drafts: {},
+              drafts: testDrafts(),
               onBack: () {},
               onCall: () {},
             ),
@@ -679,7 +689,7 @@ void main() {
               child: ConversationPane(
                 source: src,
                 room: room(),
-                drafts: {},
+                drafts: testDrafts(),
                 showHeader: false,
                 onBack: () {},
                 onCall: () {},
@@ -863,7 +873,7 @@ void main() {
       testWidgets('a name picked in a draft survives leaving the conversation',
           (tester) async {
         final src = source();
-        final drafts = <String, String>{};
+        final drafts = testDrafts();
         Widget open(Key key) => MaterialApp(
           home: Scaffold(
             body: ConversationPane(
@@ -1101,7 +1111,7 @@ void main() {
     testWidgets('Escape cancels an edit without saving', (tester) async {
       wide(tester);
       final src = FakeSource()..history = (_) => [json(1, 'me', 'mine')];
-      final drafts = <String, String>{};
+      final drafts = testDrafts();
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: ConversationPane(

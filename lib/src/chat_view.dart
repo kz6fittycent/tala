@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'avatars.dart';
 import 'chat.dart';
+import 'drafts.dart';
 import 'log.dart';
 import 'markdown.dart';
 import 'mentions.dart';
@@ -543,8 +544,9 @@ class ConversationPane extends StatefulWidget {
   final ChatSource source;
   final Room room;
 
-  /// Unsent text by conversation, so switching away doesn't lose it.
-  final Map<String, String> drafts;
+  /// Unsent text by conversation, so switching away or restarting doesn't
+  /// lose it.
+  final DraftStore drafts;
   final VoidCallback onBack;
   final VoidCallback onCall;
   final VoidCallback? onMembers;
@@ -575,10 +577,8 @@ class _ConversationPaneState extends State<ConversationPane> {
   final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
 
-  /// Survives switching conversations, as the draft holding these names does.
-  static final Map<String, PickedMentions> _pickedByRoom = {};
-  PickedMentions get _picked =>
-      _pickedByRoom.putIfAbsent(widget.room.token, PickedMentions.new);
+  /// Kept with the draft holding these names.
+  PickedMentions get _picked => widget.drafts.picked(widget.room.token);
   MentionQuery? _mention;
   List<MentionOption> _mentionOptions = const [];
   int _mentionHighlight = 0;

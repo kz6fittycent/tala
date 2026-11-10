@@ -15,6 +15,7 @@ import 'src/camera_cycle.dart';
 import 'src/chat_alerts.dart';
 import 'src/chat_view.dart';
 import 'src/desktop_notify.dart';
+import 'src/drafts.dart';
 import 'src/incoming_calls.dart';
 import 'src/log.dart';
 import 'src/nc_api.dart';
@@ -521,7 +522,9 @@ class _RoomsPageState extends State<RoomsPage> {
   String? _callToken;
   bool _callChatOpen = false;
   Timer? _roomTimer;
-  final Map<String, String> _drafts = {};
+  late final DraftStore _drafts = DraftStore(
+    account: '${widget.api.creds.user}@${widget.api.creds.server}',
+  );
   List<FederationInvite> _invites = const [];
   Timer? _inviteTimer;
   bool _inviteFailureLogged = false;
@@ -559,6 +562,7 @@ class _RoomsPageState extends State<RoomsPage> {
   /// Runs before the process ends when the user quits from the tray.
   Future<void> _beforeQuit() async {
     log('app: quitting');
+    _drafts.flush();
     _notifier.closeAll();
     await _ringer.stop();
     await Call.current?.hangUp();
@@ -589,6 +593,7 @@ class _RoomsPageState extends State<RoomsPage> {
     _lifecycle = AppLifecycleListener(onStateChange: (state) {
       log('app: ${state.name}');
       _focused = state == AppLifecycleState.resumed;
+      if (!_focused) _drafts.flush();
       _updateBadge();
     });
     widget.api
@@ -906,6 +911,7 @@ class _RoomsPageState extends State<RoomsPage> {
 
   @override
   void dispose() {
+    _drafts.flush();
     newCrash.removeListener(_offerNewCrash);
     _tray.stop();
     _lifecycle.dispose();
@@ -1081,7 +1087,7 @@ class CallPage extends StatefulWidget {
   /// Someone is already ringing, so the caller's tone isn't wanted.
   final bool answering;
   final AppSettings settings;
-  final Map<String, String> drafts;
+  final DraftStore drafts;
   final ValueChanged<bool> onChatOpen;
   @override
   State<CallPage> createState() => _CallPageState();

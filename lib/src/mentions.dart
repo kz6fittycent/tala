@@ -83,7 +83,18 @@ TextEditingValue insertMention(
 /// The ids behind the names picked in a composer. Two people can share a name,
 /// so the second one picked goes in by id rather than being remembered here.
 class PickedMentions {
+  PickedMentions();
+
+  /// From [toJson]; anything malformed is skipped.
+  PickedMentions.fromJson(Map<dynamic, dynamic> j) {
+    for (final MapEntry(:key, :value) in j.entries) {
+      if (key is String && value is String) _idByLabel[key] = value;
+    }
+  }
+
   final Map<String, String> _idByLabel = {};
+
+  Map<String, String> toJson() => {..._idByLabel};
 
   bool get isEmpty => _idByLabel.isEmpty;
 
