@@ -715,7 +715,7 @@ class _RoomsPageState extends State<RoomsPage> {
       context: context,
       barrierDismissible: false,
       builder: (_) => NewGroupDialog(
-        search: widget.api.searchPeople,
+        search: widget.api.searchMembers,
         create: widget.api.createGroup,
         add: widget.api.addMember,
       ),
@@ -742,8 +742,8 @@ class _RoomsPageState extends State<RoomsPage> {
         canManage: room.canManage,
         avatars: widget.api.avatars,
         load: () => widget.api.members(room.token),
-        search: widget.api.searchPeople,
-        add: (id) => widget.api.addMember(room.token, id),
+        search: widget.api.searchMembers,
+        add: (person) => widget.api.addMember(room.token, person),
         remove: (id) => widget.api.removeMember(room.token, id),
         setModerator: (id, on) =>
             widget.api.setModerator(room.token, id, on),
@@ -759,6 +759,9 @@ class _RoomsPageState extends State<RoomsPage> {
       builder: (_) => RenameDialog(
         name: room.name,
         rename: (name) => widget.api.renameConversation(room.token, name),
+        description: room.description,
+        describe: (text) =>
+            widget.api.describeConversation(room.token, text),
       ),
     );
     if (renamed == true && mounted) await _refreshRooms();

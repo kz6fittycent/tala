@@ -28,7 +28,7 @@ class NewGroupDialog extends StatefulWidget {
   });
   final Future<List<Person>> Function(String query) search;
   final Future<String> Function(String name) create;
-  final Future<void> Function(String token, String userId) add;
+  final Future<void> Function(String token, Person person) add;
 
   @override
   State<NewGroupDialog> createState() => _NewGroupDialogState();
@@ -64,7 +64,7 @@ class _NewGroupDialogState extends State<NewGroupDialog> {
     final notAdded = <Person>[];
     for (final person in _people) {
       try {
-        await widget.add(token, person.id);
+        await widget.add(token, person);
       } catch (e) {
         log('groups: adding a member failed: $e');
         notAdded.add(person);
@@ -133,7 +133,7 @@ class _NewGroupDialogState extends State<NewGroupDialog> {
                   label: 'Add people',
                   autofocus: false,
                   clearOnPick: true,
-                  exclude: {for (final p in _people) p.id},
+                  exclude: {for (final p in _people) p.key},
                   onPick: (person) => setState(() => _people.add(person)),
                 ),
               ),
@@ -182,7 +182,7 @@ class MembersDialog extends StatefulWidget {
   final bool canManage;
   final Future<List<Member>> Function() load;
   final Future<List<Person>> Function(String query) search;
-  final Future<void> Function(String userId) add;
+  final Future<void> Function(Person person) add;
   final Future<void> Function(int attendeeId) remove;
   final Future<void> Function(int attendeeId, bool moderator) setModerator;
 
@@ -372,15 +372,14 @@ class _MembersDialogState extends State<MembersDialog> {
                   ),
                   child: PeopleSearch(
                     search: widget.search,
-                    label: 'Add someone',
+                    label: 'Add a person, group or team',
                     autofocus: false,
                     clearOnPick: true,
                     exclude: {
-                      for (final m in _members ?? const <Member>[])
-                        if (m.actorType == 'users') m.actorId,
+                      for (final m in _members ?? const <Member>[]) m.key,
                     },
                     onPick: (person) => _change(
-                      () => widget.add(person.id),
+                      () => widget.add(person),
                       'Couldn\'t add ${person.name}.',
                     ),
                   ),
@@ -411,27 +410,47 @@ class _MembersDialogState extends State<MembersDialog> {
   }
 }
 
-/// Closes with true once the server has accepted the new name.
+/// Closes with true once the server has accepted the changes. The
+/// description is only offered when [describe] is given.
 class RenameDialog extends StatefulWidget {
-  const RenameDialog({super.key, required this.name, required this.rename});
+  const RenameDialog({
+    super.key,
+    required this.name,
+    required this.rename,
+    this.description = '',
+    this.describe,
+  });
   final String name;
   final Future<void> Function(String name) rename;
+  final String description;
+  final Future<void> Function(String description)? describe;
 
   @override
   State<RenameDialog> createState() => _RenameDialogState();
 }
 
+/// Talk's own limit on descriptions.
+const _descriptionLimit = 2000;
+
 class _RenameDialogState extends State<RenameDialog> {
   late final TextEditingController _name = TextEditingController(
     text: widget.name,
   );
+  late final TextEditingController _description = TextEditingController(
+    text: widget.description,
+  );
   bool _busy = false;
   String? _error;
 
-  bool get _canSave {
-    final name = _name.text.trim();
-    return !_busy && name.isNotEmpty && name != widget.name;
-  }
+  bool get _nameChanged => _name.text.trim() != widget.name;
+  bool get _descriptionChanged =>
+      widget.describe != null &&
+      _description.text.trim() != widget.description.trim();
+
+  bool get _canSave =>
+      !_busy &&
+      _name.text.trim().isNotEmpty &&
+      (_nameChanged || _descriptionChanged);
 
   Future<void> _save() async {
     if (!_canSave) return;
@@ -441,14 +460,17 @@ class _RenameDialogState extends State<RenameDialog> {
       _error = null;
     });
     try {
-      await widget.rename(_name.text.trim());
+      if (_nameChanged) await widget.rename(_name.text.trim());
+      if (_descriptionChanged) {
+        await widget.describe!(_description.text.trim());
+      }
       navigator.pop(true);
     } catch (e) {
-      log('groups: renaming failed: $e');
+      log('groups: saving name or description failed: $e');
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Couldn\'t rename this conversation.';
+        _error = 'Couldn\'t save the changes.';
       });
     }
   }
@@ -456,26 +478,50 @@ class _RenameDialogState extends State<RenameDialog> {
   @override
   void dispose() {
     _name.dispose();
+    _description.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Rename conversation'),
+    title: Text(
+      widget.describe == null ? 'Rename conversation' : 'Edit conversation',
+    ),
     content: SizedBox(
       width: 420,
-      child: TextField(
-        controller: _name,
-        autofocus: true,
-        enabled: !_busy,
-        maxLength: _nameLimit,
-        decoration: InputDecoration(
-          labelText: 'Name',
-          counterText: '',
-          errorText: _error,
-        ),
-        onChanged: (_) => setState(() {}),
-        onSubmitted: (_) => _save(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            autofocus: true,
+            enabled: !_busy,
+            maxLength: _nameLimit,
+            decoration: InputDecoration(
+              labelText: 'Name',
+              counterText: '',
+              errorText: widget.describe == null ? _error : null,
+            ),
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _save(),
+          ),
+          if (widget.describe != null) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _description,
+              enabled: !_busy,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: _descriptionLimit,
+              decoration: InputDecoration(
+                labelText: 'Description',
+                alignLabelWithHint: true,
+                errorText: _error,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+        ],
       ),
     ),
     actions: [

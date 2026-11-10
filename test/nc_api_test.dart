@@ -77,6 +77,7 @@ class Server {
       ]);
     } else if ((path.endsWith('/room/abc') && q.method == 'PUT') ||
         path.endsWith('/room/abc/attendees') ||
+        path.endsWith('/room/abc/description') ||
         path.endsWith('/room/abc/moderators')) {
       bodies.add(utf8.decode(body));
       _ocs(r, {});
@@ -306,6 +307,20 @@ void main() {
     expect(s.requests.first, contains('itemType=call'));
   });
 
+  test('a description is set on its own address', () async {
+    await api.describeConversation('abc', 'Monthly books');
+    expect(s.requests.last,
+        'PUT /ocs/v2.php/apps/spreed/api/v4/room/abc/description');
+    expect(jsonDecode(s.bodies.last), {'description': 'Monthly books'});
+  });
+
+  test('member search also finds groups, but not yourself', () async {
+    final found = await api.searchMembers('s');
+    expect(found.map((p) => p.key), ['users:sam', 'groups:staff']);
+    expect(s.requests.first, contains('shareTypes%5B%5D=1'));
+    expect(s.requests.first, contains('shareTypes%5B%5D=7'));
+  });
+
   test('starting a conversation asks for a one-to-one', () async {
     expect(await api.startOneToOne('sam'), 'new-room');
     expect(jsonDecode(s.bodies.single), {'roomType': 1, 'invite': 'sam'});
@@ -338,11 +353,14 @@ void main() {
   test('a group is created by name, and members are added as users', () async {
     expect(await api.createGroup('Book club'), 'new-room');
     expect(jsonDecode(s.bodies.last), {'roomType': 2, 'roomName': 'Book club'});
-    await api.addMember('abc', 'sam');
+    await api.addMember('abc', Person('sam', 'Sam', ''));
     expect(s.requests.last,
         'POST /ocs/v2.php/apps/spreed/api/v4/room/abc/participants');
     expect(jsonDecode(s.bodies.last),
         {'newParticipant': 'sam', 'source': 'users'});
+    await api.addMember('abc', Person('staff', 'Staff', '', source: 'groups'));
+    expect(jsonDecode(s.bodies.last),
+        {'newParticipant': 'staff', 'source': 'groups'});
   });
 
   test('members are read from the server\'s fields', () async {

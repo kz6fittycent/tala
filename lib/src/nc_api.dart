@@ -53,6 +53,7 @@ class Room {
     this.customAvatar = false,
     this.avatarVersion = '',
     this.status,
+    this.description = '',
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -97,6 +98,7 @@ class Room {
       otherUserId: type == 1 ? r['name'] as String? ?? '' : '',
       customAvatar: r['isCustomAvatar'] == true,
       avatarVersion: r['avatarVersion'] as String? ?? '',
+      description: r['description'] as String? ?? '',
       // Only one-to-ones carry the other person's status.
       status: type == 1 && r['status'] is String
           ? UserStatus(
@@ -140,6 +142,9 @@ class Room {
 
   /// The other person's, in a one-to-one, when the server includes it.
   final UserStatus? status;
+
+  /// What a group or public conversation is about, set by its moderators.
+  final String description;
   final bool customAvatar;
   final String avatarVersion;
 
@@ -174,12 +179,20 @@ int dockUnread(Iterable<Room> rooms) => rooms
     .where((r) => !r.archived && !r.muted)
     .fold(0, (sum, r) => sum + r.unread);
 
-/// Someone found on the server.
+/// Someone found on the server, or a whole group or team of people.
 class Person {
-  Person(this.id, this.name, this.detail);
+  Person(this.id, this.name, this.detail, {this.source = 'users'});
   final String id;
   final String name;
   final String detail;
+
+  /// users, groups or circles (teams), as the server names them.
+  final String source;
+
+  bool get isPerson => source == 'users';
+
+  /// Ids are only unique within a source: a group can share a user's id.
+  String get key => '$source:$id';
 }
 
 /// Someone in a conversation, as the server lists them.
@@ -219,6 +232,9 @@ class Member {
       !isOwner && const {'users', 'guests', 'emails'}.contains(actorType);
 
   bool get isGuest => actorType == 'guests' || actorType == 'emails';
+
+  /// Matches [Person.key] for whoever this entry was added as.
+  String get key => '$actorType:$actorId';
 
   String get displayName => name.isNotEmpty
       ? name
@@ -432,21 +448,36 @@ class NcApi implements CallSource, ChatSource {
   Future<void> declineInvite(int id) => _ocs('DELETE', '$_invitesPath/$id');
 
   /// People to start a conversation with. Never includes the user themselves.
-  Future<List<Person>> searchPeople(String query) async {
+  Future<List<Person>> searchPeople(String query) =>
+      _autocomplete(query, [0], const {'users'});
+
+  /// People, groups and teams to add to a group conversation. A group or team
+  /// joins as one entry and keeps its membership up to date by itself.
+  Future<List<Person>> searchMembers(String query) =>
+      _autocomplete(query, [0, 1, 7], const {'users', 'groups', 'circles'});
+
+  Future<List<Person>> _autocomplete(
+    String query,
+    List<int> shareTypes,
+    Set<String> sources,
+  ) async {
     final search = Uri.encodeQueryComponent(query);
+    final types = shareTypes.map((t) => '&shareTypes%5B%5D=$t').join();
     final data = await _ocs(
       'GET',
       '/ocs/v2.php/core/autocomplete/get?search=$search'
-      '&itemType=call&itemId=new&shareTypes%5B%5D=0&limit=20',
+      '&itemType=call&itemId=new$types&limit=20',
     );
     final self = await _uid();
     return [
       for (final p in data as List)
-        if (p['source'] == 'users' && p['id'] != self)
+        if (sources.contains(p['source']) &&
+            !(p['source'] == 'users' && p['id'] == self))
           Person(
             p['id'] as String,
             (p['label'] ?? p['id']) as String,
             (p['subline'] ?? p['shareWithDisplayNameUnique'] ?? '') as String,
+            source: p['source'] as String,
           ),
     ];
   }
@@ -480,10 +511,10 @@ class NcApi implements CallSource, ChatSource {
     ];
   }
 
-  Future<void> addMember(String token, String userId) => _ocs(
+  Future<void> addMember(String token, Person person) => _ocs(
     'POST',
     '$_talkV4/room/$token/participants',
-    body: {'newParticipant': userId, 'source': 'users'},
+    body: {'newParticipant': person.id, 'source': person.source},
   );
 
   /// Takes the id in the address, as the web client does: this is a DELETE, and
@@ -505,6 +536,13 @@ class NcApi implements CallSource, ChatSource {
 
   Future<void> renameConversation(String token, String name) =>
       _ocs('PUT', '$_talkV4/room/$token', body: {'roomName': name});
+
+  /// Empty clears it.
+  Future<void> describeConversation(String token, String description) => _ocs(
+    'PUT',
+    '$_talkV4/room/$token/description',
+    body: {'description': description},
+  );
 
   /// Creates a conversation people can join by link, without an account.
   Future<String> createGuestConversation(String name, String password) async {

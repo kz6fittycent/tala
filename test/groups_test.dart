@@ -114,7 +114,7 @@ void main() {
             created = name;
             return 'tok';
           },
-          add: (token, id) async => added.add('$token/$id'),
+          add: (token, p) async => added.add('$token/${p.id}'),
         ),
         result: (r) => result = r,
       );
@@ -155,8 +155,8 @@ void main() {
         NewGroupDialog(
           search: search,
           create: (_) async => 'tok',
-          add: (_, id) async {
-            if (id == 'sam') throw ApiException(404, 'p');
+          add: (_, p) async {
+            if (p.id == 'sam') throw ApiException(404, 'p');
           },
         ),
         result: (r) => result = r,
@@ -231,7 +231,7 @@ void main() {
     MembersDialog dialog({
       bool canManage = true,
       Future<List<Member>> Function()? load,
-      Future<void> Function(String)? add,
+      Future<void> Function(Person)? add,
       Future<void> Function(int)? remove,
       Future<void> Function(int, bool)? setModerator,
     }) => MembersDialog(
@@ -239,9 +239,13 @@ void main() {
       selfId: 'me',
       canManage: canManage,
       load: load ?? () async => people(),
-      search: (_) async => [
-        Person('zed', 'zed', ''),
-        Person('new', 'New Person', ''),
+      search: (q) async => [
+        for (final p in [
+          Person('zed', 'zed', ''),
+          Person('new', 'New Person', ''),
+          Person('staff', 'Staff', '', source: 'groups'),
+        ])
+          if (p.name.toLowerCase().contains(q)) p,
       ],
       add: add ?? (_) async {},
       remove: remove ?? (_) async {},
@@ -297,10 +301,10 @@ void main() {
             loads++;
             return people();
           },
-          add: (id) async => added.add(id),
+          add: (p) async => added.add(p.id),
         ),
       );
-      await searchFor(tester, 'Add someone', 'e');
+      await searchFor(tester, 'Add a person, group or team', 'e');
       expect(find.widgetWithText(ListTile, 'New Person'), findsOneWidget);
       // zed is on the list below, but not offered above it.
       expect(find.text('zed'), findsOneWidget);
@@ -308,6 +312,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(added, ['new']);
       expect(loads, 2);
+    });
+
+    testWidgets('a whole group can be added, marked as a group', (
+      tester,
+    ) async {
+      final added = <String>[];
+      await open<void>(
+        tester,
+        dialog(add: (p) async => added.add(p.key)),
+      );
+      await searchFor(tester, 'Add a person, group or team', 'st');
+      expect(
+        find.descendant(
+          of: find.widgetWithText(ListTile, 'Staff'),
+          matching: find.byIcon(Icons.groups_outlined),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Staff'));
+      await tester.pumpAndSettle();
+      expect(added, ['groups:staff']);
     });
 
     testWidgets('promotes, demotes and removes with the right person', (
@@ -374,7 +399,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await open<void>(tester, dialog());
-      await searchFor(tester, 'Add someone', 'e');
+      await searchFor(tester, 'Add a person, group or team', 'e');
       expect(tester.takeException(), isNull);
     });
 
@@ -419,6 +444,30 @@ void main() {
       expect(result, isTrue);
     });
 
+    testWidgets('a description is saved alone when only it changed', (
+      tester,
+    ) async {
+      final calls = <String>[];
+      await open<bool>(
+        tester,
+        RenameDialog(
+          name: 'Club',
+          rename: (n) async => calls.add('name $n'),
+          description: 'Old',
+          describe: (d) async => calls.add('description $d'),
+        ),
+      );
+      expect(find.text('Edit conversation'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Description'),
+        ' Books, monthly ',
+      );
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(calls, ['description Books, monthly']);
+    });
+
     testWidgets('a failure stays open', (tester) async {
       await open<bool>(
         tester,
@@ -431,7 +480,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Couldn\'t rename'), findsOneWidget);
+      expect(find.textContaining('Couldn\'t save'), findsOneWidget);
     });
   });
 }

@@ -43,10 +43,10 @@ void main() {
     expect(room.hasMembers, isTrue);
     expect(room.canManage, isTrue, reason: 'the creator is its owner');
 
-    await alice.addMember(token, 'bob');
-    await alice.addMember(token, 'carol');
+    await alice.addMember(token, Person('bob', 'bob', ''));
+    await alice.addMember(token, Person('carol', 'carol', ''));
     await expectLater(
-      alice.addMember(token, 'nobody-by-this-name'),
+      alice.addMember(token, Person('nobody-by-this-name', '', '')),
       throwsA(isA<ApiException>()),
     );
 

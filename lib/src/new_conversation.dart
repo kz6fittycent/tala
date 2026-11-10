@@ -21,7 +21,7 @@ class PeopleSearch extends StatefulWidget {
   final ValueChanged<Person> onPick;
   final String label;
 
-  /// User ids not to offer, such as people already chosen.
+  /// [Person.key]s not to offer, such as people already chosen.
   final Set<String> exclude;
 
   /// For picking several people in a row.
@@ -103,7 +103,7 @@ class _PeopleSearchState extends State<PeopleSearch> {
       );
     }
     final people = [
-      ...?_people?.where((p) => !widget.exclude.contains(p.id)),
+      ...?_people?.where((p) => !widget.exclude.contains(p.key)),
     ];
     final String? message = _failed
         ? 'Couldn\'t search. Check your connection and try again.'
@@ -120,6 +120,15 @@ class _PeopleSearchState extends State<PeopleSearch> {
         shrinkWrap: true,
         itemCount: people.length,
         itemBuilder: (context, i) => ListTile(
+          leading: people[i].isPerson
+              ? null
+              : Icon(
+                  people[i].source == 'groups'
+                      ? Icons.groups_outlined
+                      : Icons.diversity_3_outlined,
+                  semanticLabel:
+                      people[i].source == 'groups' ? 'Group' : 'Team',
+                ),
           title: Text(
             people[i].name,
             maxLines: 1,

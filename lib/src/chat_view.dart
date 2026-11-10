@@ -323,7 +323,10 @@ class _RoomTile extends StatelessWidget {
       if (room.hasMembers && onMembers != null)
         const PopupMenuItem(value: 'members', child: Text('Members…')),
       if (room.canManage && onRename != null)
-        const PopupMenuItem(value: 'rename', child: Text('Rename…')),
+        const PopupMenuItem(
+          value: 'rename',
+          child: Text('Name and description…'),
+        ),
       if (room.hasGuestLink && onGuestLink != null)
         const PopupMenuItem(value: 'link', child: Text('Guest link…')),
       if (room.canArchive)
@@ -928,6 +931,16 @@ class _ConversationPaneState extends State<ConversationPane> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,
+                        )
+                      else if (room.description.trim().isNotEmpty)
+                        Tooltip(
+                          message: room.description.trim(),
+                          child: Text(
+                            room.description.trim().replaceAll('\n', ' '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         ),
                     ],
                   ),
