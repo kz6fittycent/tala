@@ -10,6 +10,7 @@ import 'chat_alerts.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 import 'mentions.dart';
+import 'presence.dart';
 import 'search.dart';
 
 /// Also the device name the server lists for Tala's app password.
@@ -51,6 +52,7 @@ class Room {
     this.otherUserId = '',
     this.customAvatar = false,
     this.avatarVersion = '',
+    this.status,
   });
 
   factory Room.fromJson(Map<String, dynamic> r) {
@@ -95,6 +97,14 @@ class Room {
       otherUserId: type == 1 ? r['name'] as String? ?? '' : '',
       customAvatar: r['isCustomAvatar'] == true,
       avatarVersion: r['avatarVersion'] as String? ?? '',
+      // Only one-to-ones carry the other person's status.
+      status: type == 1 && r['status'] is String
+          ? UserStatus(
+              r['status'] as String,
+              message: r['statusMessage'] as String? ?? '',
+              icon: r['statusIcon'] as String? ?? '',
+            )
+          : null,
       lastMessage: last is Map && last['id'] is int
           ? ChatMessage.fromJson(last.cast<String, dynamic>())
           : null,
@@ -127,6 +137,9 @@ class Room {
   final bool hasPassword;
 
   final String otherUserId;
+
+  /// The other person's, in a one-to-one, when the server includes it.
+  final UserStatus? status;
   final bool customAvatar;
   final String avatarVersion;
 
@@ -921,7 +934,7 @@ class NcApi implements CallSource, ChatSource {
   }
 
   Future<List<Room>> rooms() async {
-    final data = await _ocs('GET', '$_talkV4/room') as List;
+    final data = await _ocs('GET', '$_talkV4/room?includeStatus=true') as List;
     final rooms = [
       for (final r in data) Room.fromJson((r as Map).cast<String, dynamic>()),
     ];
@@ -967,6 +980,31 @@ class NcApi implements CallSource, ChatSource {
     log('check: system kinds $kinds');
     log('check: segments $segments');
   }
+
+  static const _statusApi = '/ocs/v2.php/apps/user_status/api/v1';
+
+  /// Tells the server whether the user is at the computer. Null when the
+  /// server has no status to report back.
+  Future<UserStatus?> heartbeat({required bool away}) async {
+    final d = await _ocs(
+      'PUT',
+      '$_statusApi/heartbeat',
+      body: {'status': away ? 'away' : 'online'},
+    );
+    return d is Map ? UserStatus.fromJson(d.cast<String, dynamic>()) : null;
+  }
+
+  Future<UserStatus> ownStatus() async {
+    final d = await _ocs('GET', '$_statusApi/user_status');
+    return UserStatus.fromJson((d as Map).cast<String, dynamic>());
+  }
+
+  /// online, away, dnd or invisible.
+  Future<void> setStatus(String type) => _ocs(
+    'PUT',
+    '$_statusApi/user_status/status',
+    body: {'statusType': type},
+  );
 
   Future<SignalingSettings> signalingSettings(String token) async =>
       SignalingSettings((await _ocs(

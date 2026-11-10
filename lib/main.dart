@@ -22,6 +22,7 @@ import 'src/log.dart';
 import 'src/nc_api.dart';
 import 'src/guest_link.dart';
 import 'src/new_conversation.dart';
+import 'src/presence.dart';
 import 'src/ringer.dart';
 import 'src/settings.dart';
 import 'src/tray.dart';
@@ -523,6 +524,11 @@ class _RoomsPageState extends State<RoomsPage> {
   String? _callToken;
   bool _callChatOpen = false;
   Timer? _roomTimer;
+  late final Presence _presence = Presence(
+    heartbeat: widget.api.heartbeat,
+    fetchOwn: widget.api.ownStatus,
+    setOwn: widget.api.setStatus,
+  );
   late final DraftStore _drafts = DraftStore(
     account: '${widget.api.creds.user}@${widget.api.creds.server}',
   );
@@ -595,11 +601,13 @@ class _RoomsPageState extends State<RoomsPage> {
       log('app: ${state.name}');
       _focused = state == AppLifecycleState.resumed;
       if (!_focused) _drafts.flush();
+      _presence.focusChanged(_focused);
       _updateBadge();
     });
     widget.api
       ..onChatNotes = _alerts.update
       ..onConversationRead = _alerts.conversationRead;
+    _presence.start(focused: _focused);
     FileDrops.instance.onUnwanted = (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -919,6 +927,7 @@ class _RoomsPageState extends State<RoomsPage> {
   @override
   void dispose() {
     _drafts.flush();
+    _presence.dispose();
     FileDrops.instance.onUnwanted = null;
     newCrash.removeListener(_offerNewCrash);
     _tray.stop();
@@ -1025,6 +1034,7 @@ class _RoomsPageState extends State<RoomsPage> {
             settings: widget.settings,
             creds: widget.api.creds,
             onChangeAccount: widget.onChangeAccount,
+            presence: _presence,
           ),
           onNewConversation: _newConversation,
           onGuestLink: _showGuestLink,

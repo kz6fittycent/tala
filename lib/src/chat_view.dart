@@ -15,6 +15,7 @@ import 'log.dart';
 import 'markdown.dart';
 import 'mentions.dart';
 import 'nc_api.dart';
+import 'presence.dart';
 import 'settings.dart';
 
 /// Below this the two panes don't both fit, so one shows at a time. Larger
@@ -371,7 +372,10 @@ class _RoomTile extends StatelessWidget {
       child: ListTile(
         selected: selected,
         selectedTileColor: scheme.secondaryContainer,
-        leading: Avatar(name: room.name, image: avatars?.forRoom(room)),
+        leading: withStatus(
+          Avatar(name: room.name, image: avatars?.forRoom(room)),
+          room.status?.type,
+        ),
         title: Text(
           room.name,
           maxLines: 1,
@@ -908,11 +912,24 @@ class _ConversationPaneState extends State<ConversationPane> {
                   ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    room.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        room.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (room.status?.summary case final line?)
+                        Text(
+                          line,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
                   ),
                 ),
                 if (widget.onSearch != null)

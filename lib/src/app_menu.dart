@@ -5,6 +5,7 @@ import 'app_info.dart';
 import 'chat_view.dart';
 import 'log.dart';
 import 'nc_api.dart';
+import 'presence.dart';
 import 'report_view.dart';
 import 'settings.dart';
 import 'tray.dart';
@@ -120,6 +121,7 @@ class _SignInFormState extends State<SignInForm> {
 
 enum _MenuChoice {
   account,
+  status,
   appearance,
   sound,
   archived,
@@ -136,7 +138,11 @@ class AppMenu extends StatefulWidget {
     required this.settings,
     required this.creds,
     required this.onChangeAccount,
+    this.presence,
   });
+
+  /// Null, or unavailable, hides the status choice.
+  final Presence? presence;
 
   final AppSettings settings;
   final Credentials creds;
@@ -196,6 +202,11 @@ class _AppMenuState extends State<AppMenu> {
             onChangeAccount: widget.onChangeAccount,
           ),
         );
+      case _MenuChoice.status:
+        showDialog<void>(
+          context: context,
+          builder: (_) => StatusDialog(presence: widget.presence!),
+        );
       case _MenuChoice.appearance:
         showDialog<void>(
           context: context,
@@ -237,6 +248,22 @@ class _AppMenuState extends State<AppMenu> {
           ),
         ),
       ),
+      if (widget.presence case final p? when p.available)
+        PopupMenuItem(
+          value: _MenuChoice.status,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: SizedBox(
+              width: 24,
+              child: Center(
+                child: statusColor(p.own?.type ?? '') == null
+                    ? const Icon(Icons.circle_outlined, size: 14)
+                    : StatusDot(p.own!.type, size: 14),
+              ),
+            ),
+            title: Text('Status: ${statusLabel(p.own?.type ?? 'offline')}…'),
+          ),
+        ),
       const PopupMenuDivider(),
       _item(_MenuChoice.appearance, Icons.palette_outlined, 'Appearance…'),
       const PopupMenuDivider(),
