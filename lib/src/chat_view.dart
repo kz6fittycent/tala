@@ -975,6 +975,7 @@ class _ConversationPaneState extends State<ConversationPane> {
           message: o,
           onRetry: () => _thread.retry(o),
           onDiscard: () => _thread.discard(o),
+          onCancel: () => _thread.cancelUpload(o),
         ),
       );
     }
@@ -1869,26 +1870,44 @@ class _OutgoingBubble extends StatelessWidget {
     required this.message,
     required this.onRetry,
     required this.onDiscard,
+    required this.onCancel,
   });
   final OutgoingMessage message;
   final VoidCallback onRetry;
   final VoidCallback onDiscard;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final failed = message.state == SendState.failed;
+    final progress = message.progress;
     return _Bubble(
       own: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(message.filePath != null ? '📎 ${message.text}' : message.text),
-          if (!failed)
-            Text(
-              message.filePath != null ? 'Uploading…' : 'Sending…',
-              style: theme.textTheme.bodySmall,
-            )
+          if (!failed && message.filePath != null) ...[
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 200,
+              child: LinearProgressIndicator(value: progress),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  progress == null
+                      ? 'Uploading…'
+                      : 'Uploading… ${(progress * 100).floor()}%',
+                  style: theme.textTheme.bodySmall,
+                ),
+                TextButton(onPressed: onCancel, child: const Text('Cancel')),
+              ],
+            ),
+          ] else if (!failed)
+            Text('Sending…', style: theme.textTheme.bodySmall)
           else
             Row(
               mainAxisSize: MainAxisSize.min,

@@ -111,7 +111,8 @@ class _DemoSource implements ChatSource {
   @override
   Future<bool> chatUploadsAllowed() async => true;
   @override
-  Future<String> chatUpload(String p) => throw UnimplementedError();
+  Future<String> chatUpload(String p, {UploadControl? control}) =>
+      throw UnimplementedError();
   @override
   Future<void> chatShareFile(String t, String p, String r) async {}
   @override

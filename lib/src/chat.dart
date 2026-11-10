@@ -301,8 +301,9 @@ abstract class ChatSource {
   Future<bool> chatUploadsAllowed();
 
   /// Stores a local file in the user's attachment folder and returns its path
-  /// there. Never overwrites an existing file.
-  Future<String> chatUpload(String localPath);
+  /// there. Never overwrites an existing file. Reports through [control], and
+  /// stops with [UploadCancelled] when it's cancelled.
+  Future<String> chatUpload(String localPath, {UploadControl? control});
 
   /// Posts an uploaded file to the conversation.
   Future<void> chatShareFile(
@@ -321,6 +322,35 @@ abstract class ChatSource {
 }
 
 enum SendState { sending, failed }
+
+class UploadCancelled implements Exception {}
+
+/// Progress and cancelling for one upload.
+class UploadControl {
+  UploadControl({this.onProgress});
+  final void Function(int sent, int total)? onProgress;
+  final List<void Function()> _onCancel = [];
+  bool _cancelled = false;
+
+  bool get cancelled => _cancelled;
+
+  void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    for (final f in _onCancel) {
+      f();
+    }
+    _onCancel.clear();
+  }
+
+  /// Runs [f] on cancel, or at once if that already happened.
+  void whenCancelled(void Function() f) =>
+      _cancelled ? f() : _onCancel.add(f);
+
+  void throwIfCancelled() {
+    if (_cancelled) throw UploadCancelled();
+  }
+}
 
 class OutgoingMessage {
   OutgoingMessage(
@@ -345,6 +375,10 @@ class OutgoingMessage {
   /// Kept after a successful upload, so retrying only redoes the share and
   /// doesn't leave a second copy of the file.
   String? remotePath;
+
+  /// How much of a file has gone, from 0 to 1, or null before it starts.
+  double? progress;
+  UploadControl? upload;
   SendState state = SendState.sending;
   String? error;
 }
@@ -642,11 +676,25 @@ class ChatThread extends ChangeNotifier {
     _changed();
   }
 
+  /// Stops a file that's still uploading. Nothing is posted to the chat.
+  void cancelUpload(OutgoingMessage o) {
+    o.upload?.cancel();
+    discard(o);
+  }
+
   Future<void> _attempt(OutgoingMessage o) async {
     try {
       final file = o.filePath;
       if (file != null) {
-        final remote = o.remotePath ??= await _source.chatUpload(file);
+        final control = o.upload = UploadControl(
+          onProgress: (sent, total) {
+            o.progress = total > 0 ? sent / total : null;
+            _changed();
+          },
+        );
+        final remote =
+            o.remotePath ??= await _source.chatUpload(file, control: control);
+        control.throwIfCancelled();
         await _source.chatShareFile(token, remote, o.referenceId);
         if (_disposed) return;
         // The poll delivers the resulting message.
@@ -658,6 +706,9 @@ class ChatThread extends ChangeNotifier {
         // someone else sent just before this one.
         _addVisible(sent);
       }
+      _outgoing.remove(o);
+    } on UploadCancelled {
+      log('chat: upload cancelled');
       _outgoing.remove(o);
     } catch (e) {
       log('chat: send failed: $e');

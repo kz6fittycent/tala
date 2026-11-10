@@ -595,7 +595,14 @@ class NcApi implements CallSource, ChatSource {
 
   /// `If-None-Match: *` makes the server refuse rather than overwrite a file
   /// that already has this name.
-  Future<int> _davPut(Uri uri, File file, int length) async {
+  /// Sends in pieces, waiting for each to leave, so progress is real.
+  Future<int> _davPut(
+    Uri uri,
+    File file,
+    int length,
+    UploadControl? control,
+  ) async {
+    control?.throwIfCancelled();
     final req = await _http.putUrl(uri);
     _authHeaders(req);
     req.followRedirects = false;
@@ -603,10 +610,24 @@ class NcApi implements CallSource, ChatSource {
       ..set('If-None-Match', '*')
       ..contentLength = length
       ..contentType = ContentType.binary;
-    await req.addStream(file.openRead());
-    final res = await req.close();
-    await res.drain<void>();
-    return res.statusCode;
+    control?.whenCancelled(() => req.abort(UploadCancelled()));
+    try {
+      var sent = 0;
+      control?.onProgress?.call(0, length);
+      await for (final chunk in file.openRead()) {
+        control?.throwIfCancelled();
+        req.add(chunk);
+        await req.flush();
+        sent += chunk.length;
+        control?.onProgress?.call(sent, length);
+      }
+      final res = await req.close();
+      await res.drain<void>();
+      return res.statusCode;
+    } catch (_) {
+      control?.throwIfCancelled();
+      rethrow;
+    }
   }
 
   Future<void> _davMkdirs(String uid, List<String> folder) async {
@@ -624,7 +645,10 @@ class NcApi implements CallSource, ChatSource {
   }
 
   @override
-  Future<String> chatUpload(String localPath) async {
+  Future<String> chatUpload(
+    String localPath, {
+    UploadControl? control,
+  }) async {
     final cfg = await _attachments();
     if (cfg['allowed'] != true) throw ApiException(403, 'attachments');
     final uid = await _uid();
@@ -643,8 +667,12 @@ class NcApi implements CallSource, ChatSource {
     var attempt = 0;
     while (attempt < 100) {
       final candidate = attempt == 0 ? name : '$stem ($attempt)$ext';
-      final status =
-          await _davPut(_davUri(uid, [...folder, candidate]), file, length);
+      final status = await _davPut(
+        _davUri(uid, [...folder, candidate]),
+        file,
+        length,
+        control,
+      );
       if (status < 300) return '/${[...folder, candidate].join('/')}';
       if (status == 412) {
         attempt++;

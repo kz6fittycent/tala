@@ -97,9 +97,17 @@ class FakeSource implements ChatSource {
   @override
   Future<bool> chatUploadsAllowed() async => uploadsAllowed;
 
+  UploadControl? lastUpload;
+  Completer<void>? uploadGate;
+
   @override
-  Future<String> chatUpload(String localPath) async {
+  Future<String> chatUpload(String localPath, {UploadControl? control}) async {
     uploads.add(localPath);
+    lastUpload = control;
+    control?.onProgress?.call(1, 4);
+    final gate = uploadGate;
+    if (gate != null) await gate.future;
+    control?.throwIfCancelled();
     final e = uploadError;
     if (e != null) throw e;
     return '/Talk/f';
@@ -503,6 +511,25 @@ void main() {
       await t.sendFile('/home/me/a.pdf');
       expect(src.uploads, ['/home/me/a.pdf']);
       expect(src.shares, ['/Talk/f']);
+      expect(t.outgoing, isEmpty);
+    });
+
+    test('an upload reports progress and can be cancelled', () async {
+      src
+        ..history = ((_) => [msg(1)])
+        ..uploadGate = Completer<void>();
+      t.start();
+      await settle();
+      final sending = t.sendFile('/home/me/a.pdf');
+      await settle();
+      final o = t.outgoing.single;
+      expect(o.progress, 0.25);
+      t.cancelUpload(o);
+      expect(t.outgoing, isEmpty);
+      expect(src.lastUpload!.cancelled, isTrue);
+      src.uploadGate!.complete();
+      await sending;
+      expect(src.shares, isEmpty);
       expect(t.outgoing, isEmpty);
     });
 

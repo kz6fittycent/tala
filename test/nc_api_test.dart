@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tala/src/chat.dart' show ApiException;
+import 'package:tala/src/chat.dart' show ApiException, UploadCancelled, UploadControl;
 import 'package:tala/src/nc_api.dart';
 
 /// A loopback server, so these exercise the real HTTP requests.
@@ -192,6 +192,25 @@ void main() {
     expect(remote, '/Talk/photo one.png');
     expect(s.stored['$talk/photo one.png'], [9, 8, 7]);
     expect(s.requests.where((r) => r.startsWith('MKCOL')).length, 1);
+  });
+
+  test('reports progress up to the whole file', () async {
+    final seen = <String>[];
+    await api.chatUpload(
+      local,
+      control: UploadControl(onProgress: (a, b) => seen.add('$a/$b')),
+    );
+    expect(seen.first, '0/3');
+    expect(seen.last, '3/3');
+  });
+
+  test('a cancelled upload stops and stores nothing', () async {
+    final control = UploadControl()..cancel();
+    await expectLater(
+      api.chatUpload(local, control: control),
+      throwsA(isA<UploadCancelled>()),
+    );
+    expect(s.stored, isEmpty);
   });
 
   test('never overwrites: an existing name gets a new one', () async {
