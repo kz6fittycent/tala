@@ -550,6 +550,11 @@ class _RoomsPageState extends State<RoomsPage> {
           : _callChatOpen && inCall == token;
     },
     show: (note) {
+      // Do not disturb is the user's word, whatever the server still sends.
+      if (_presence.own?.type == 'dnd') {
+        _refreshRooms();
+        return;
+      }
       _notifier.show(
         note.token,
         note.title,
