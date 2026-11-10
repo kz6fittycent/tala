@@ -11,8 +11,8 @@ for Linux. Tala (Old Norse "to speak") is an independent project, not affiliated
 with or endorsed by Nextcloud GmbH.
 
 Tala is free: no price, no ads. You sign in through your own server's login
-page, and Tala keeps its app password in your desktop keyring. It's at an early
-stage and in testing.
+page, and Tala keeps its app password in your desktop keyring. It's young, so
+please report anything that doesn't work.
 
 ![Tala's conversation list and chat](docs/screenshots/main-dark.png)
 
@@ -20,9 +20,14 @@ The people and conversations in these pictures are made up.
 
 ## Features
 
-- Chat with replies, reactions, @ mentions, avatars, Markdown, message search, editing, deleting, file uploads and image previews
-- Audio and video calls, with ringing for incoming calls
-- Group conversations: create them, add and remove people, choose moderators, rename
+- Chat with replies, reactions, @ mentions, avatars, Markdown, polls, read
+  ticks, message search, editing, deleting, file uploads (by button or drag and
+  drop, with progress) and image previews
+- Audio and video calls, with ringing for incoming calls, and screen sharing
+- Group conversations: create them, add and remove people, groups and teams,
+  choose moderators, rename and describe them
+- Online, away and Do not disturb status, yours and other people's
+- Drafts kept across restarts
 - Invite people with no account using a link or an email invitation (guests join
   in their browser)
 - Desktop notifications with a chime, and an unread count on the dock icon
@@ -38,12 +43,13 @@ Without it, everyone connects directly, which suits small calls.
 
 ## Install
 
-Tala is a snap for 64-bit Linux (amd64), on the candidate channel while it's in
-testing:
+Tala is a snap for 64-bit Linux (amd64):
 
 ```
-sudo snap install tala --candidate
+sudo snap install tala
 ```
+
+New versions go to the candidate channel first (`--candidate`) for testing.
 
 Then connect the permissions it needs, once:
 
@@ -83,7 +89,7 @@ More in the [wiki](https://github.com/kz6fittycent/tala/wiki).
 ## Building from source
 
 You need [Flutter](https://docs.flutter.dev/get-started), plus
-`libayatana-appindicator3-dev` and `libsecret-1-dev`.
+`libayatana-appindicator3-dev`, `libsecret-1-dev` and `libpipewire-0.3-dev`.
 
 ```
 flutter build linux --release --no-tree-shake-icons
