@@ -275,6 +275,10 @@ const _hiddenKinds = {
   'message_deleted',
   'message_edited',
   'poll_voted',
+  // Every arrival and departure in a call; "Call ended" already says who
+  // took part and for how long.
+  'call_joined',
+  'call_left',
 };
 
 abstract class ChatSource {

@@ -333,6 +333,18 @@ void main() {
       expect(src.waitAfter, [2]);
     });
 
+    test('call arrivals and departures stay out of the chat', () async {
+      src.history = (_) => [
+            msg(1, system: 'call_started'),
+            msg(2, system: 'call_joined'),
+            msg(3, system: 'call_left'),
+            msg(4, system: 'call_ended'),
+          ];
+      t.start();
+      await settle();
+      expect(t.messages.map((m) => m.id), [1, 4]);
+    });
+
     test('a live delete replaces the original message', () async {
       src.history = (_) => [msg(1)];
       t.start();
