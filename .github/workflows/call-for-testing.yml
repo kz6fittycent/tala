@@ -176,6 +176,7 @@ jobs:
              sudo snap connect ${SNAP_NAME}:password-manager-service
              sudo snap connect ${SNAP_NAME}:camera
              sudo snap connect ${SNAP_NAME}:audio-record
+             sudo snap connect ${SNAP_NAME}:removable-media
              \`\`\`
 
           3. Launch it and try it out.
