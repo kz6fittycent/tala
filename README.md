@@ -23,7 +23,8 @@ The people and conversations in these pictures are made up.
 - Chat with replies, reactions, @ mentions, avatars, Markdown, polls, read
   ticks, message search, editing, deleting, file uploads (by button or drag and
   drop, with progress) and image previews
-- Audio and video calls, with ringing for incoming calls, and screen sharing
+- Audio and video calls, with ringing for incoming calls, screen sharing and
+  background blur
 - Group conversations: create them, add and remove people, groups and teams,
   choose moderators, rename and describe them
 - Online, away and Do not disturb status, yours (on your avatar at the top,

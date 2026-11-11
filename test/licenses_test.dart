@@ -15,6 +15,16 @@ void main() {
     ]);
   });
 
+  test('the blur model\'s license ships and is declared', () {
+    final text = File('assets/licenses/mediapipe_selfie.txt').readAsStringSync();
+    expect(text, contains('MediaPipe Selfie Segmentation'));
+    expect(text, contains('Apache License'));
+    expect(File('pubspec.yaml').readAsStringSync(),
+        contains('assets/licenses/mediapipe_selfie.txt'));
+    expect(File('third_party/flutter_webrtc/linux/selfie_model_data.inc')
+        .readAsStringSync(), contains('Apache License 2.0'));
+  });
+
   test('the shipped file covers what libwebrtc.so compiles in', () {
     final parsed = parseBundledLicenses(
       File('assets/licenses/libwebrtc.txt').readAsStringSync(),

@@ -248,3 +248,5 @@ Tala ships libwebrtc release libwebrtc.m150.7871.07 (Linux x64), and these are i
   - FFmpeg, revision ad41607c61898cf7150e0fb20fe4bbabd44922a3 as listed in that branch's DEPS file: https://chromium.googlesource.com/chromium/third_party/ffmpeg/
 
 The licenses of FFmpeg and the other libraries inside libwebrtc.so are in assets/licenses/libwebrtc.txt and on the license page in Tala's About dialog.
+
+Background blur runs the MediaPipe Selfie Segmentation model (landscape) by Google, licensed under the Apache License, Version 2.0. Its weights are compiled into the WebRTC plugin from third_party/flutter_webrtc/linux/selfie_model_data.inc. The license is in assets/licenses/mediapipe_selfie.txt and on the license page in Tala's About dialog.

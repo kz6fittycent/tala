@@ -48,7 +48,7 @@ def read_ppm(path):
 def main(model, picture=None):
     tmp = tempfile.mkdtemp()
     exe = os.path.join(tmp, 'check')
-    subprocess.run(['g++', '-std=c++17', '-O3', '-march=x86-64-v2',
+    subprocess.run(['g++', '-std=c++14', '-O3', '-Wall', '-Werror',
                     '-I', SRC, os.path.join(SRC, 'selfie_segmenter.cc'),
                     os.path.join(ROOT, 'tool/blur/check_main.cc'), '-o', exe],
                    check=True)

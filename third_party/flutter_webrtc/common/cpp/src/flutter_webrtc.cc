@@ -19,7 +19,41 @@ FlutterWebRTC::FlutterWebRTC(FlutterWebRTCPlugin* plugin)
       FlutterFrameCryptor::FlutterFrameCryptor(this),
       FlutterDataPacketCryptor::FlutterDataPacketCryptor(this) {}
 
-FlutterWebRTC::~FlutterWebRTC() {}
+FlutterWebRTC::~FlutterWebRTC() {
+#ifdef __linux__
+  // Before the sources go with FlutterWebRTCBase, so none calls a freed
+  // processor.
+  for (auto& blur : blurs_) RemoveVideoProcessor(blur.first, blur.second.get());
+#endif
+}
+
+#ifdef __linux__
+bool FlutterWebRTC::SetBackgroundBlur(const std::string& track_id,
+                                      bool enabled) {
+  // Free processors whose tracks are gone; their sources already let go.
+  for (auto it = blurs_.begin(); it != blurs_.end();) {
+    if (!MediaTrackForId(it->first)) {
+      it = blurs_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  auto found = blurs_.find(track_id);
+  if (!enabled) {
+    if (found != blurs_.end()) {
+      // Waits for a frame in progress, so freeing afterwards is safe.
+      RemoveVideoProcessor(track_id, found->second.get());
+      blurs_.erase(found);
+    }
+    return false;
+  }
+  if (found != blurs_.end()) return true;
+  auto blur = std::make_unique<tala::BlurProcessor>();
+  if (!AddVideoProcessor(track_id, blur.get())) return false;
+  blurs_[track_id] = std::move(blur);
+  return true;
+}
+#endif
 
 void FlutterWebRTC::HandleMethodCall(
     const MethodCallProxy& method_call,
@@ -90,6 +124,16 @@ void FlutterWebRTC::HandleMethodCall(
     const EncodableMap params =
         GetValue<EncodableMap>(*method_call.arguments());
     StopPortalDisplayMedia(findString(params, "streamId"), std::move(result));
+  } else if (method_call.method_name().compare("setBackgroundBlur") == 0) {
+    if (!method_call.arguments()) {
+      result->Error("Bad Arguments", "trackId and enabled are required");
+      return;
+    }
+    const EncodableMap params =
+        GetValue<EncodableMap>(*method_call.arguments());
+    const std::string track_id = findString(params, "trackId");
+    const bool enabled = findBoolean(params, "enabled");
+    result->Success(EncodableValue(SetBackgroundBlur(track_id, enabled)));
 #endif
   } else if (method_call.method_name().compare("getDesktopSources") == 0) {
     // types: ["screen", "window"]

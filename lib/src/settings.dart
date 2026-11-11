@@ -23,6 +23,7 @@ class AppSettings extends ChangeNotifier {
   Accent _accent = accents.first;
   bool _messageSound = true;
   bool _callChatOpen = true;
+  bool _blurBackground = false;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -46,6 +47,10 @@ class AppSettings extends ChangeNotifier {
   bool get callChatOpen => _callChatOpen;
   set callChatOpen(bool value) => _change(() => _callChatOpen = value);
 
+  /// Whether calls start with the background blurred.
+  bool get blurBackground => _blurBackground;
+  set blurBackground(bool value) => _change(() => _blurBackground = value);
+
   void _change(VoidCallback apply) {
     apply();
     notifyListeners();
@@ -62,6 +67,7 @@ class AppSettings extends ChangeNotifier {
       _accent = accentNamed(d['accent'] as String?);
       _messageSound = d['messageSound'] != false;
       _callChatOpen = d['callChatOpen'] != false;
+      _blurBackground = d['blurBackground'] == true;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
@@ -86,6 +92,7 @@ class AppSettings extends ChangeNotifier {
         'accent': _accent.name,
         'messageSound': _messageSound,
         'callChatOpen': _callChatOpen,
+        'blurBackground': _blurBackground,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

@@ -112,7 +112,13 @@ class Call extends ChangeNotifier {
   /// The call in progress, so quitting from the tray can hang it up first.
   static Call? current;
 
-  Call(this.api, this.room, {this.answering = false, this.openMedia});
+  Call(
+    this.api,
+    this.room, {
+    this.answering = false,
+    this.openMedia,
+    this.blurOn = false,
+  });
   final NcApi api;
   final Room room;
 
@@ -166,6 +172,13 @@ class Call extends ChangeNotifier {
   String state = 'Starting';
   bool micOn = true;
   bool camOn = true;
+
+  /// The background behind the user is blurred before their video goes out
+  /// (and in their own preview). Done in the WebRTC plugin, Linux only.
+  bool blurOn;
+
+  /// Whether a blur processor is attached to the camera track now.
+  bool _blurAttached = false;
 
   /// The system's picker is open.
   bool choosingScreen = false;
@@ -326,6 +339,7 @@ class Call extends ChangeNotifier {
         t.enabled = camOn;
       }
       localRenderer.srcObject = stream;
+      await _applyBlur();
       if (!_mesh) await _publish();
     } else {
       await _discard(Future.value(stream));
@@ -1039,6 +1053,45 @@ class Call extends ChangeNotifier {
     }
     _sendStatus();
     notifyListeners();
+    unawaited(_applyBlur());
+  }
+
+  /// Returns false if blur couldn't be turned on.
+  Future<bool> toggleBlur() async {
+    blurOn = !blurOn;
+    notifyListeners();
+    final ok = await _applyBlur();
+    if (!ok) {
+      blurOn = false;
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  /// Attaches or removes the blur so it runs only while wanted and the camera
+  /// is on. Returns false if it was wanted but the plugin couldn't attach it.
+  Future<bool> _applyBlur() async {
+    final want = blurOn && camOn && !_ended;
+    final tracks = _local?.getVideoTracks() ?? const <MediaStreamTrack>[];
+    if (tracks.isEmpty || want == _blurAttached) return true;
+    var ok = true;
+    for (final t in tracks) {
+      final id = t.id;
+      if (id == null) continue;
+      try {
+        final r = await WebRTC.invokeMethod('setBackgroundBlur', {
+          'trackId': id,
+          'enabled': want,
+        });
+        if (want && r != true) ok = false;
+      } catch (e) {
+        log('call: background blur failed: $e');
+        ok = !want;
+      }
+    }
+    _blurAttached = want && ok;
+    if (want) log('call: background blur ${ok ? 'on' : 'unavailable'}');
+    return ok;
   }
 
   Future<void> hangUp() async {
@@ -1058,6 +1111,8 @@ class Call extends ChangeNotifier {
       await _dropScreen(s);
     }
     await _publisher?.pc.close();
+    // _ended makes this detach the blur before the track goes.
+    await _applyBlur();
     for (final t in _local?.getTracks() ?? <MediaStreamTrack>[]) {
       await t.stop();
     }

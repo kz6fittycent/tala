@@ -1138,7 +1138,21 @@ class _CallPageState extends State<CallPage> {
     widget.api,
     widget.room,
     answering: widget.answering,
+    blurOn: widget.settings.blurBackground,
   )..start();
+
+  Future<void> _toggleBlur() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final wanted = !_call.blurOn;
+    final ok = await _call.toggleBlur();
+    // Remembered for the next call only when it took.
+    if (ok) widget.settings.blurBackground = wanted;
+    if (!ok && mounted) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Couldn\'t blur your background.')),
+      );
+    }
+  }
 
   /// Keeps the chat, with its scroll and any reply in progress, when resizing
   /// moves it between beside and under the video.
@@ -1245,6 +1259,15 @@ class _CallPageState extends State<CallPage> {
                     icon: Icon(
                         _call.camOn ? Icons.videocam : Icons.videocam_off),
                     onPressed: _call.toggleCam),
+                const SizedBox(width: 12),
+                IconButton.filled(
+                    tooltip: _call.blurOn
+                        ? 'Stop blurring your background'
+                        : 'Blur your background',
+                    isSelected: _call.blurOn,
+                    icon: const Icon(Icons.blur_off),
+                    selectedIcon: const Icon(Icons.blur_on),
+                    onPressed: _call.camOn ? _toggleBlur : null),
                 const SizedBox(width: 12),
                 IconButton.filled(
                     tooltip: _call.choosingScreen

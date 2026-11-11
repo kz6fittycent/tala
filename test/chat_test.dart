@@ -1996,9 +1996,12 @@ void main() {
           ..themeMode = ThemeMode.dark
           ..accent = accentNamed('green')
           ..messageSound = false
-          ..callChatOpen = false;
+          ..callChatOpen = false
+          ..blurBackground = true;
         final again = AppSettings(file: file);
         expect(again.callChatOpen, isFalse);
+        expect(again.blurBackground, isTrue);
+        expect(tempPrefs().blurBackground, isFalse);
         expect(again.hideArchived, isTrue);
         expect(again.archivedOpen, isTrue);
         expect(again.themeMode, ThemeMode.dark);

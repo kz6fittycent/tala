@@ -36,6 +36,8 @@ add_library(${PLUGIN_NAME} SHARED
   "flutter/plugin_registrar.cc"
   "task_runner_linux.cc"
   "portal_screencast.cc"
+  "selfie_segmenter.cc"
+  "background_blur.cc"
 )
 
 include_directories(
