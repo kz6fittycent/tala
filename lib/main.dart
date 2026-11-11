@@ -1051,6 +1051,7 @@ class _RoomsPageState extends State<RoomsPage> {
             creds: widget.api.creds,
             onChangeAccount: widget.onChangeAccount,
             presence: _presence,
+            avatar: widget.api.avatars.forUser(widget.api.creds.user),
           ),
           onNewConversation: _newConversation,
           onGuestLink: _showGuestLink,

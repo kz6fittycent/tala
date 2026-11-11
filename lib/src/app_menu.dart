@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 import 'app_info.dart';
+import 'avatars.dart';
 import 'chat_view.dart';
 import 'log.dart';
 import 'nc_api.dart';
@@ -139,10 +140,15 @@ class AppMenu extends StatefulWidget {
     required this.creds,
     required this.onChangeAccount,
     this.presence,
+    this.avatar,
   });
 
   /// Null, or unavailable, hides the status choice.
   final Presence? presence;
+
+  /// The user's own picture. With it, the button is the user's avatar with
+  /// their status on its corner, as on the web, instead of a ⋮.
+  final AvatarImage? avatar;
 
   final AppSettings settings;
   final Credentials creds;
@@ -229,10 +235,30 @@ class _AppMenuState extends State<AppMenu> {
     }
   }
 
+  Widget _button() {
+    final presence = widget.presence;
+    Widget avatar(String? status) => withStatus(
+      Avatar(name: creds.user, image: widget.avatar, radius: 14),
+      status,
+      size: 11,
+    );
+    if (presence == null) return avatar(null);
+    return ListenableBuilder(
+      listenable: presence,
+      builder: (context, _) {
+        final status = presence.available ? presence.own?.type : null;
+        return Semantics(
+          label: status == null ? null : 'Your status: ${statusLabel(status)}',
+          child: avatar(status),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) => PopupMenuButton<_MenuChoice>(
     tooltip: 'Menu',
-    icon: const Icon(Icons.more_vert),
+    icon: widget.avatar == null ? const Icon(Icons.more_vert) : _button(),
     onSelected: (choice) => _chosen(context, choice),
     itemBuilder: (context) => [
       PopupMenuItem(

@@ -81,13 +81,14 @@ class StatusDot extends StatelessWidget {
 }
 
 /// Puts [dot] on [avatar]'s lower right corner.
-Widget withStatus(Widget avatar, String? type) => type == null
+Widget withStatus(Widget avatar, String? type, {double size = 12}) =>
+    type == null
     ? avatar
     : Stack(
         clipBehavior: Clip.none,
         children: [
           avatar,
-          Positioned(right: -2, bottom: -2, child: StatusDot(type)),
+          Positioned(right: -2, bottom: -2, child: StatusDot(type, size: size)),
         ],
       );
 

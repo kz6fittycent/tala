@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/main.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_menu.dart';
+import 'package:tala/src/avatars.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/groups.dart';
 import 'package:tala/src/mentions.dart';
@@ -26,6 +27,7 @@ import 'package:tala/src/drafts.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
+import 'package:tala/src/presence.dart';
 import 'package:tala/src/report.dart';
 import 'package:tala/src/report_view.dart';
 import 'package:tala/src/settings.dart';
@@ -221,6 +223,15 @@ Widget _main() {
         settings: settings,
         creds: _demoCreds,
         onChangeAccount: (_) {},
+        presence: Presence(
+          heartbeat: ({required bool away}) async => null,
+          fetchOwn: () async => const UserStatus('online'),
+          setOwn: (_) async {},
+        )..own = const UserStatus('online'),
+        avatar: AvatarStore(
+          fetchUser: (_) async => null,
+          fetchRoom: (_) async => null,
+        ).forUser(_demoCreds.user),
       ),
       onNewConversation: () {},
       onSearch: () {},

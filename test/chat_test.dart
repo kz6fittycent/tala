@@ -13,7 +13,9 @@ import 'package:tala/src/mentions.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
 import 'package:tala/src/app_menu.dart';
+import 'package:tala/src/avatars.dart';
 import 'package:tala/src/settings.dart';
+import 'package:tala/src/presence.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
 
@@ -1385,6 +1387,46 @@ void main() {
         await tester.tap(find.byTooltip('Menu'));
         await tester.pumpAndSettle();
       }
+
+      testWidgets('with an avatar, the button is the user with their status',
+          (tester) async {
+        wide(tester);
+        final store = AvatarStore(
+          fetchUser: (_) async => null,
+          fetchRoom: (_) async => null,
+        );
+        final presence = Presence(
+          heartbeat: ({required bool away}) async => null,
+          fetchOwn: () async => const UserStatus('online'),
+          setOwn: (_) async {},
+        )..own = const UserStatus('online');
+        addTearDown(presence.dispose);
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                AppMenu(
+                  settings: tempPrefs(),
+                  creds: Credentials('https://cloud.example/nc', 'me', 'pw'),
+                  onChangeAccount: (_) {},
+                  presence: presence,
+                  avatar: store.forUser('me'),
+                ),
+              ],
+            ),
+          ),
+        ));
+        await tester.pump();
+        expect(find.byIcon(Icons.more_vert), findsNothing);
+        expect(find.text('M'), findsOneWidget);
+        expect(find.bySemanticsLabel(RegExp('Your status: Online')), findsOneWidget);
+        await presence.set('dnd');
+        await tester.pump();
+        expect(find.bySemanticsLabel(RegExp('Your status: Do not disturb')),
+            findsOneWidget);
+        await open(tester);
+        expect(find.text('cloud.example/nc'), findsOneWidget);
+      });
 
       testWidgets('shows the account and sets the theme', (tester) async {
         wide(tester);
