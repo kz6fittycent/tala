@@ -13,10 +13,16 @@ constexpr int kMaskH = SelfieSegmenter::kHeight;
 // keeps the edge from flickering.
 constexpr float kMaskFollow = 0.6f;
 
-// Mask values between these blend; below is background, above is person.
-constexpr float kEdgeLow = 0.25f;
-constexpr float kEdgeHigh = 0.75f;
-constexpr int kMaskSoften = 1;  // box radius in mask pixels
+// The mask's edge is refined against the picture at about this width: the
+// model's mask is 256 wide, so on a 1280 wide camera each of its pixels spans
+// five, too coarse to follow hair and shoulders.
+constexpr int kGuideWidth = 640;
+// Guided filter: box radius in guide pixels, and how much picture contrast it
+// takes to move the edge (pictures from 0 to 1). Smaller follows the picture
+// more closely, but also latches onto background texture beside the person.
+constexpr int kGuideRadius = 4;
+constexpr float kGuideEps = 0.02f;
+
 
 // The blurred copy is made at about this width, whatever the camera's size,
 // so the blur looks the same at any resolution.
@@ -35,21 +41,29 @@ void Shrink(const uint8_t* p, int w, int h, int stride, int factor,
   sw = (w + factor - 1) / factor;
   sh = (h + factor - 1) / factor;
   out.assign(static_cast<size_t>(sw) * sh, 0.0f);
-  std::vector<int> counts(out.size(), 0);
-  for (int y = 0; y < h; y++) {
-    const uint8_t* row = p + static_cast<size_t>(y) * stride;
-    float* o = &out[static_cast<size_t>(y / factor) * sw];
-    int* c = &counts[static_cast<size_t>(y / factor) * sw];
-    for (int x = 0; x < w; x++) {
-      o[x / factor] += row[x];
-      c[x / factor]++;
+  for (int by = 0; by < sh; by++) {
+    const int y0 = by * factor, y1 = std::min(y0 + factor, h);
+    float* o = &out[static_cast<size_t>(by) * sw];
+    for (int y = y0; y < y1; y++) {
+      const uint8_t* row = p + static_cast<size_t>(y) * stride;
+      for (int bx = 0; bx < sw; bx++) {
+        const int x0 = bx * factor, x1 = std::min(x0 + factor, w);
+        int sum = 0;
+        for (int x = x0; x < x1; x++) sum += row[x];
+        o[bx] += sum;
+      }
+    }
+    const int rows = y1 - y0;
+    for (int bx = 0; bx < sw; bx++) {
+      const int cols = std::min(bx * factor + factor, w) - bx * factor;
+      o[bx] /= rows * cols;
     }
   }
-  for (size_t i = 0; i < out.size(); i++) out[i] /= counts[i];
 }
 
 // Box blur along rows then columns, clamping at the edges; repeated, it
-// approaches a Gaussian.
+// approaches a Gaussian. The column pass slides a running sum over whole
+// rows, so memory is read in order.
 void BoxBlur(std::vector<float>& p, int w, int h, int r,
              std::vector<float>& tmp) {
   tmp.resize(p.size());
@@ -64,14 +78,21 @@ void BoxBlur(std::vector<float>& p, int w, int h, int r,
       sum += in[std::min(x + r + 1, w - 1)] - in[std::max(x - r, 0)];
     }
   }
-  for (int x = 0; x < w; x++) {
-    float sum = 0;
-    for (int k = -r; k <= r; k++)
-      sum += tmp[static_cast<size_t>(std::min(std::max(k, 0), h - 1)) * w + x];
-    for (int y = 0; y < h; y++) {
-      p[static_cast<size_t>(y) * w + x] = sum * scale;
-      sum += tmp[static_cast<size_t>(std::min(y + r + 1, h - 1)) * w + x] -
-             tmp[static_cast<size_t>(std::max(y - r, 0)) * w + x];
+  auto row = [&](int y) {
+    return &tmp[static_cast<size_t>(std::min(std::max(y, 0), h - 1)) * w];
+  };
+  std::vector<float> sum(w, 0.0f);
+  for (int k = -r; k <= r; k++) {
+    const float* t = row(k);
+    for (int x = 0; x < w; x++) sum[x] += t[x];
+  }
+  for (int y = 0; y < h; y++) {
+    float* out = &p[static_cast<size_t>(y) * w];
+    const float* add = row(y + r + 1);
+    const float* drop = row(y - r);
+    for (int x = 0; x < w; x++) {
+      out[x] = sum[x] * scale;
+      sum[x] += add[x] - drop[x];
     }
   }
 }
@@ -102,21 +123,21 @@ void VerticalLerp(const float* p, int w, int h, int y0, float fy, float* out) {
 // mask and the small copy, leaving one lerp a pixel along the row.
 void Blend(const uint8_t* in, int stride, int w, int h,
            const std::vector<float>& small, int sw, int sh,
-           const std::vector<float>& mask, uint8_t* out) {
+           const std::vector<float>& mask, int mw, int mh, uint8_t* out) {
   std::vector<int> mx, my, bx, by;
   std::vector<float> mfx, mfy, bfx, bfy;
-  Axis(w, kMaskW, mx, mfx);
-  Axis(h, kMaskH, my, mfy);
+  Axis(w, mw, mx, mfx);
+  Axis(h, mh, my, mfy);
   Axis(w, sw, bx, bfx);
   Axis(h, sh, by, bfy);
-  std::vector<float> mrow(kMaskW), brow(sw);
+  std::vector<float> mrow(mw), brow(sw);
   for (int y = 0; y < h; y++) {
-    VerticalLerp(mask.data(), kMaskW, kMaskH, my[y], mfy[y], mrow.data());
+    VerticalLerp(mask.data(), mw, mh, my[y], mfy[y], mrow.data());
     VerticalLerp(small.data(), sw, sh, by[y], bfy[y], brow.data());
     const uint8_t* row = in + static_cast<size_t>(y) * stride;
     uint8_t* o = out + static_cast<size_t>(y) * w;
     for (int x = 0; x < w; x++) {
-      const int m0 = mx[x], m1 = std::min(m0 + 1, kMaskW - 1);
+      const int m0 = mx[x], m1 = std::min(m0 + 1, mw - 1);
       const float m = mrow[m0] + (mrow[m1] - mrow[m0]) * mfx[x];
       if (m >= 0.999f) {
         o[x] = row[x];
@@ -126,6 +147,54 @@ void Blend(const uint8_t* in, int stride, int w, int h,
       const float b = brow[b0] + (brow[b1] - brow[b0]) * bfx[x];
       o[x] = Clamp8(b + (row[x] - b) * m);
     }
+  }
+}
+
+// Bilinear resize of a float plane, half pixel centers.
+void Resample(const std::vector<float>& src, int sw, int sh, int dw, int dh,
+              std::vector<float>& out) {
+  std::vector<int> xs, ys;
+  std::vector<float> fx, fy;
+  Axis(dw, sw, xs, fx);
+  Axis(dh, sh, ys, fy);
+  out.resize(static_cast<size_t>(dw) * dh);
+  std::vector<float> row(sw);
+  for (int y = 0; y < dh; y++) {
+    VerticalLerp(src.data(), sw, sh, ys[y], fy[y], row.data());
+    float* o = &out[static_cast<size_t>(y) * dw];
+    for (int x = 0; x < dw; x++) {
+      const int x0 = xs[x], x1 = std::min(x0 + 1, sw - 1);
+      o[x] = row[x0] + (row[x1] - row[x0]) * fx[x];
+    }
+  }
+}
+
+// He, Sun and Tang's guided filter: makes `p` follow the edges of the guide
+// picture `g`. Both w by h; the result goes back into `p`, clamped to 0..1.
+void GuidedFilter(const std::vector<float>& g, std::vector<float>& p, int w,
+                  int h, int r, float eps, std::vector<float>& tmp) {
+  const size_t n = g.size();
+  std::vector<float> mean_g = g, mean_p = p, gg(n), gp(n);
+  for (size_t i = 0; i < n; i++) {
+    gg[i] = g[i] * g[i];
+    gp[i] = g[i] * p[i];
+  }
+  BoxBlur(mean_g, w, h, r, tmp);
+  BoxBlur(mean_p, w, h, r, tmp);
+  BoxBlur(gg, w, h, r, tmp);
+  BoxBlur(gp, w, h, r, tmp);
+  // gg and gp become the a and b of each window.
+  for (size_t i = 0; i < n; i++) {
+    const float var = gg[i] - mean_g[i] * mean_g[i];
+    const float cov = gp[i] - mean_g[i] * mean_p[i];
+    const float a = cov / (var + eps);
+    gg[i] = a;
+    gp[i] = mean_p[i] - a * mean_g[i];
+  }
+  BoxBlur(gg, w, h, r, tmp);
+  BoxBlur(gp, w, h, r, tmp);
+  for (size_t i = 0; i < n; i++) {
+    p[i] = std::min(std::max(gg[i] * g[i] + gp[i], 0.0f), 1.0f);
   }
 }
 
@@ -161,16 +230,19 @@ void BackgroundBlur::Segment(const I420& in) {
 void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
                            uint8_t* out_v) {
   Segment(in);
-  // Shaped toward a firmer edge, then softened a little so the model's
-  // pixel steps don't show once stretched to the camera's size.
-  shaped_.resize(mask_.size());
-  for (size_t i = 0; i < mask_.size(); i++) {
-    const float t =
-        std::min(std::max((mask_[i] - kEdgeLow) / (kEdgeHigh - kEdgeLow), 0.0f),
-                 1.0f);
-    shaped_[i] = t * t * (3 - 2 * t);
-  }
-  BoxBlur(shaped_, kMaskW, kMaskH, kMaskSoften, scratch_);
+  // The model's mask, refined against the picture's brightness at about
+  // kGuideWidth, so the edge lands on the person's real outline.
+  const int gf = std::max(1, in.width / kGuideWidth);
+  int gw, gh;
+  Shrink(in.y, in.width, in.height, in.stride_y, gf, guide_, gw, gh);
+  for (float& v : guide_) v /= 255;
+  Resample(mask_, kMaskW, kMaskH, gw, gh, refined_);
+  GuidedFilter(guide_, refined_, gw, gh, kGuideRadius, kGuideEps, scratch_);
+  // A gentle S-curve: the model's unsure fringe leans to one side or the
+  // other instead of showing half sharp. Anything harder turns that fringe
+  // into sharp cutouts.
+  for (float& v : refined_) v = v * v * (3 - 2 * v);
+
   const int factor = std::max(1, in.width / kSmallWidth);
   const int cw = (in.width + 1) / 2, ch = (in.height + 1) / 2;
   const uint8_t* planes[3] = {in.y, in.u, in.v};
@@ -188,9 +260,24 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
     // pixel covers 2 * f.
     const int scale = i == 0 ? factor : 2 * f;
     const int r = std::max(1, (kBlurRadius * factor + scale / 2) / scale);
-    for (int p = 0; p < kBlurPasses; p++) BoxBlur(small_[i], sw, sh, r, scratch_);
+    // Only the background is blurred, each pixel weighted by how much it is
+    // background, so the person's colors don't spread into a halo around
+    // them. Where there's no background nearby, the person shows anyway.
+    Resample(refined_, gw, gh, sw, sh, weight_);
+    for (size_t k = 0; k < weight_.size(); k++) {
+      weight_[k] = 1 - weight_[k];
+      small_[i][k] *= weight_[k];
+    }
+    for (int p = 0; p < kBlurPasses; p++) {
+      BoxBlur(small_[i], sw, sh, r, scratch_);
+      BoxBlur(weight_, sw, sh, r, scratch_);
+    }
+    for (size_t k = 0; k < weight_.size(); k++) {
+      small_[i][k] = weight_[k] > 1e-3f ? small_[i][k] / weight_[k]
+                                        : (i == 0 ? 16.0f : 128.0f);
+    }
     Blend(planes[i], strides[i], widths[i], heights[i], small_[i], sw, sh,
-          shaped_, outs[i]);
+          refined_, gw, gh, outs[i]);
   }
 }
 

@@ -34,10 +34,11 @@ class BackgroundBlur {
 
   SelfieSegmenter segmenter_;
   std::vector<float> rgb_;
-  // The person mask, smoothed over frames and shaped, at the model's size.
+  // The person mask at the model's size, smoothed over frames; refined_
+  // is it fitted to the picture's edges at the guide's size.
   std::vector<float> mask_;
   int mask_width_ = 0, mask_height_ = 0;  // frame size mask_ belongs to
-  std::vector<float> shaped_;
+  std::vector<float> guide_, refined_, weight_;
   std::vector<float> small_[3];
   std::vector<float> scratch_;
 };
