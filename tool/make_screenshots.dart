@@ -27,6 +27,7 @@ import 'package:tala/src/drafts.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
+import 'package:tala/src/polls.dart';
 import 'package:tala/src/presence.dart';
 import 'package:tala/src/report.dart';
 import 'package:tala/src/report_view.dart';
@@ -219,20 +220,7 @@ Widget _main() {
       onRemove: (_) {},
       onArchive: (_) {},
       settings: settings,
-      menu: AppMenu(
-        settings: settings,
-        creds: _demoCreds,
-        onChangeAccount: (_) {},
-        presence: Presence(
-          heartbeat: ({required bool away}) async => null,
-          fetchOwn: () async => const UserStatus('online'),
-          setOwn: (_) async {},
-        )..own = const UserStatus('online'),
-        avatar: AvatarStore(
-          fetchUser: (_) async => null,
-          fetchRoom: (_) async => null,
-        ).forUser(_demoCreds.user),
-      ),
+      menu: _menu(settings),
       onNewConversation: () {},
       onSearch: () {},
       conversation: ConversationPane(
@@ -246,6 +234,111 @@ Widget _main() {
     ),
   );
 }
+
+/// The same window with another conversation open.
+Widget _mainWith(
+  Room room,
+  _DemoSource source, {
+  PollSource? polls,
+}) {
+  final settings = AppSettings();
+  return Scaffold(
+    body: ChatLayout(
+      rooms: [for (final r in _rooms) r.token == room.token ? room : r],
+      roomsError: null,
+      selected: room,
+      onSelect: (_) {},
+      onRefresh: () {},
+      onRemove: (_) {},
+      onArchive: (_) {},
+      settings: settings,
+      menu: _menu(settings),
+      onNewConversation: () {},
+      onSearch: () {},
+      conversation: ConversationPane(
+        source: source,
+        room: room,
+        drafts: _drafts(),
+        polls: polls,
+        onBack: () {},
+        onCall: () {},
+        onSearch: () {},
+      ),
+    ),
+  );
+}
+
+Presence _demoPresence() => Presence(
+  heartbeat: ({required bool away}) async => null,
+  fetchOwn: () async => const UserStatus('online'),
+  setOwn: (_) async {},
+)..own = const UserStatus('online');
+
+Widget _menu(AppSettings settings) => AppMenu(
+  settings: settings,
+  creds: _demoCreds,
+  onChangeAccount: (_) {},
+  presence: _demoPresence(),
+  avatar: AvatarStore(
+    fetchUser: (_) async => null,
+    fetchRoom: (_) async => null,
+  ).forUser(_demoCreds.user),
+);
+
+final _priya = Room(
+  'priya',
+  'Priya Nair',
+  false,
+  1,
+  selfId: 'sam',
+  lastRead: 203,
+  lastActivity: _now - 25 * 60,
+  lastMessage: _message(203, 'priya', 'Priya Nair',
+      'Sending the photos over now', 25),
+  canArchive: true,
+  otherUserId: 'priya',
+  status: const UserStatus('online', message: 'Back from the lake'),
+);
+
+final _priyaChat = [
+  _message(201, 'sam', 'Sam Rivers', 'How was the trip?', 70),
+  _message(202, 'priya', 'Priya Nair', 'Wonderful. The water was so clear!', 31),
+  _message(203, 'priya', 'Priya Nair', 'Sending the photos over now', 25),
+];
+
+final _pollMessage = ChatMessage.fromJson({
+  'id': 107,
+  'actorType': 'users',
+  'actorId': 'maya',
+  'actorDisplayName': 'Maya Chen',
+  'timestamp': _now - 60,
+  'message': '{object}',
+  'messageParameters': {
+    'object': {'type': 'talk-poll', 'id': '1', 'name': 'Where should we eat after?'},
+  },
+});
+
+final _poll = Poll.fromJson({
+  'id': 1,
+  'question': 'Where should we eat after?',
+  'options': ['Pizza by the lake', 'Taco truck', 'Pack a picnic'],
+  'votes': {'option-0': 2, 'option-1': 1},
+  'numVoters': 3,
+  'votedSelf': [0],
+  'status': 0,
+  'resultMode': 0,
+  'maxVotes': 1,
+  'actorType': 'users',
+  'actorId': 'maya',
+  'actorDisplayName': 'Maya Chen',
+});
+
+final _pollSource = PollSource(
+  load: (_, _) async => _poll,
+  vote: (_, _, _) async => _poll,
+  close: (_, _) async => _poll,
+  create: (_, _, _, {required hidden, required multiple}) async {},
+);
 
 Future<void> _shot(WidgetTester tester, String name) async {
   await tester.runAsync(() async {
@@ -361,6 +454,38 @@ void main() {
       ),
     );
   }
+
+  testWidgets('status', (t) {
+    return scene(
+      t,
+      'status',
+      _main(),
+      then: () => dialog(t, StatusDialog(presence: _demoPresence())),
+    );
+  });
+
+  testWidgets('one-to-one with status', (t) {
+    return scene(
+      t,
+      'one-to-one',
+      _mainWith(_priya, _DemoSource()..only = _priyaChat),
+    );
+  });
+
+  testWidgets('poll', (t) {
+    return scene(
+      t,
+      'poll',
+      _mainWith(
+        _hike,
+        _DemoSource()..only = [..._chat, _pollMessage],
+        polls: _pollSource,
+      ),
+      then: () async {
+        await t.tap(find.text('Open poll'));
+      },
+    );
+  });
 
   testWidgets('appearance', (t) {
     return scene(

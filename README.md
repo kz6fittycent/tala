@@ -26,7 +26,8 @@ The people and conversations in these pictures are made up.
 - Audio and video calls, with ringing for incoming calls, and screen sharing
 - Group conversations: create them, add and remove people, groups and teams,
   choose moderators, rename and describe them
-- Online, away and Do not disturb status, yours and other people's
+- Online, away and Do not disturb status, yours (on your avatar at the top,
+  as on the web) and other people's, when the server's User status app is on
 - Drafts kept across restarts
 - Invite people with no account using a link or an email invitation (guests join
   in their browser)
@@ -76,6 +77,10 @@ disks.
 | An incoming call | Reporting a problem |
 | ![Guest link](docs/screenshots/guest-link.png) | ![New group](docs/screenshots/new-group.png) |
 | Inviting someone without an account | Creating a group |
+| ![A poll](docs/screenshots/poll.png) | ![Your status](docs/screenshots/status.png) |
+| A poll's results | Choosing your status |
+| ![One-to-one with status](docs/screenshots/one-to-one.png) | |
+| Someone else's status in a one-to-one | |
 
 More in the [wiki](https://github.com/kz6fittycent/tala/wiki).
 
