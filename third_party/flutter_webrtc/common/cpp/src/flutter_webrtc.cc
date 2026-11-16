@@ -29,7 +29,9 @@ FlutterWebRTC::~FlutterWebRTC() {
 
 #ifdef __linux__
 bool FlutterWebRTC::SetBackgroundBlur(const std::string& track_id,
-                                      bool enabled) {
+                                      bool enabled,
+                                      std::vector<uint8_t> picture, int width,
+                                      int height) {
   // Free processors whose tracks are gone; their sources already let go.
   for (auto it = blurs_.begin(); it != blurs_.end();) {
     if (!MediaTrackForId(it->first)) {
@@ -47,8 +49,12 @@ bool FlutterWebRTC::SetBackgroundBlur(const std::string& track_id,
     }
     return false;
   }
-  if (found != blurs_.end()) return true;
+  if (found != blurs_.end()) {
+    found->second->SetPicture(std::move(picture), width, height);
+    return true;
+  }
   auto blur = std::make_unique<tala::BlurProcessor>();
+  blur->SetPicture(std::move(picture), width, height);
   if (!AddVideoProcessor(track_id, blur.get())) return false;
   blurs_[track_id] = std::move(blur);
   return true;
@@ -133,7 +139,12 @@ void FlutterWebRTC::HandleMethodCall(
         GetValue<EncodableMap>(*method_call.arguments());
     const std::string track_id = findString(params, "trackId");
     const bool enabled = findBoolean(params, "enabled");
-    result->Success(EncodableValue(SetBackgroundBlur(track_id, enabled)));
+    // Optional: a picture to show instead of blurring.
+    std::vector<uint8_t> picture = findVector(params, "picture");
+    const int width = findInt(params, "width");
+    const int height = findInt(params, "height");
+    result->Success(EncodableValue(SetBackgroundBlur(
+        track_id, enabled, std::move(picture), width, height)));
 #endif
   } else if (method_call.method_name().compare("getDesktopSources") == 0) {
     // types: ["screen", "window"]

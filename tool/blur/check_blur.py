@@ -1,10 +1,11 @@
 """Times Tala's background blur and draws its result on a picture.
 
     /tmp/v/bin/pip install numpy pillow
-    /tmp/v/bin/python tool/blur/check_blur.py picture.jpg out-dir
+    /tmp/v/bin/python tool/blur/check_blur.py picture.jpg out-dir [background.jpg]
 
 Writes blur-<width>x<height>.png for a 1280x720 and a 640x480 camera frame
-made from the picture (stretched, as a camera's would be framed).
+made from the picture (stretched, as a camera's would be framed). With a
+background, it goes behind the person instead, into background-<w>x<h>.png.
 """
 import os
 import subprocess
@@ -42,7 +43,7 @@ def from_i420(data, w, h):
     return Image.fromarray(np.clip(rgb + 0.5, 0, 255).astype(np.uint8))
 
 
-def main(picture, out_dir):
+def main(picture, out_dir, background=None):
     tmp = tempfile.mkdtemp()
     exe = os.path.join(tmp, 'check')
     subprocess.run(['g++', '-std=c++14', '-O3', '-Wall', '-Werror', '-I', SRC,
@@ -51,14 +52,20 @@ def main(picture, out_dir):
                     os.path.join(ROOT, 'tool/blur/check_blur_main.cc'), '-o', exe],
                    check=True)
     src = Image.open(picture).convert('RGB')
+    extra = []
+    if background:
+        bg = Image.open(background).convert('RGBA')
+        braw = os.path.join(tmp, 'background')
+        open(braw, 'wb').write(bg.tobytes())
+        extra = [braw, str(bg.width), str(bg.height)]
     for w, h in ((1280, 720), (640, 480)):
         frame = np.asarray(src.resize((w, h), Image.BILINEAR))
         fin, fout = os.path.join(tmp, 'in'), os.path.join(tmp, 'out')
         open(fin, 'wb').write(to_i420(frame))
-        r = subprocess.run([exe, str(w), str(h), fin, fout, '30'], check=True,
+        r = subprocess.run([exe, str(w), str(h), fin, fout, '30'] + extra, check=True,
                            capture_output=True, text=True)
         print(r.stdout.strip())
-        path = os.path.join(out_dir, f'blur-{w}x{h}.png')
+        path = os.path.join(out_dir, f"{'background' if background else 'blur'}-{w}x{h}.png")
         from_i420(open(fout, 'rb').read(), w, h).save(path)
         print('  ->', path)
 

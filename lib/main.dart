@@ -10,6 +10,8 @@ import 'src/account_store.dart';
 import 'src/app_colors.dart';
 import 'src/app_info.dart';
 import 'src/app_menu.dart';
+import 'src/background_picker.dart';
+import 'src/backgrounds.dart';
 import 'src/call.dart';
 import 'src/chat.dart';
 import 'src/camera_cycle.dart';
@@ -1138,18 +1140,23 @@ class _CallPageState extends State<CallPage> {
     widget.api,
     widget.room,
     answering: widget.answering,
-    blurOn: widget.settings.blurBackground,
+    background: widget.settings.callBackground,
   )..start();
 
-  Future<void> _toggleBlur() async {
+  Future<void> _chooseBackground() async {
     final messenger = ScaffoldMessenger.of(context);
-    final wanted = !_call.blurOn;
-    final ok = await _call.toggleBlur();
+    final wanted = await showBackgroundPicker(context, _call.background);
+    if (wanted == null || !mounted) return;
+    final ok = await _call.setBackground(wanted);
     // Remembered for the next call only when it took.
-    if (ok) widget.settings.blurBackground = wanted;
+    if (ok) widget.settings.callBackground = wanted;
     if (!ok && mounted) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Couldn\'t blur your background.')),
+        SnackBar(
+          content: Text(wanted == CallBackground.blur
+              ? 'Couldn\'t blur your background.'
+              : 'Couldn\'t show that background.'),
+        ),
       );
     }
   }
@@ -1261,13 +1268,11 @@ class _CallPageState extends State<CallPage> {
                     onPressed: _call.toggleCam),
                 const SizedBox(width: 12),
                 IconButton.filled(
-                    tooltip: _call.blurOn
-                        ? 'Stop blurring your background'
-                        : 'Blur your background',
-                    isSelected: _call.blurOn,
-                    icon: const Icon(Icons.blur_off),
-                    selectedIcon: const Icon(Icons.blur_on),
-                    onPressed: _call.camOn ? _toggleBlur : null),
+                    tooltip: 'Background',
+                    isSelected: _call.background != CallBackground.none,
+                    icon: const Icon(Icons.wallpaper_outlined),
+                    selectedIcon: const Icon(Icons.wallpaper),
+                    onPressed: _call.camOn ? _chooseBackground : null),
                 const SizedBox(width: 12),
                 IconButton.filled(
                     tooltip: _call.choosingScreen

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'backgrounds.dart';
 import 'internal_signaling.dart';
 import 'log.dart';
 import 'ringer.dart';
@@ -117,7 +118,8 @@ class Call extends ChangeNotifier {
     this.room, {
     this.answering = false,
     this.openMedia,
-    this.blurOn = false,
+    this.background = CallBackground.none,
+    this.loadPicture = loadBackground,
   });
   final NcApi api;
   final Room room;
@@ -173,12 +175,19 @@ class Call extends ChangeNotifier {
   bool micOn = true;
   bool camOn = true;
 
-  /// The background behind the user is blurred before their video goes out
+  /// What's behind the user, blurred or replaced before their video goes out
   /// (and in their own preview). Done in the WebRTC plugin, Linux only.
-  bool blurOn;
+  CallBackground background;
 
-  /// Whether a blur processor is attached to the camera track now.
-  bool _blurAttached = false;
+  /// Reads the picture for a background; replaceable in tests.
+  final Future<BackgroundPicture?> Function(CallBackground) loadPicture;
+
+  /// What the camera track's processor is showing now; none when there's no
+  /// processor attached.
+  CallBackground _attached = CallBackground.none;
+
+  /// Background changes run one at a time, in order.
+  Future<bool> _backgroundQueue = Future.value(true);
 
   /// The system's picker is open.
   bool choosingScreen = false;
@@ -339,7 +348,7 @@ class Call extends ChangeNotifier {
         t.enabled = camOn;
       }
       localRenderer.srcObject = stream;
-      await _applyBlur();
+      await _applyBackground();
       if (!_mesh) await _publish();
     } else {
       await _discard(Future.value(stream));
@@ -1053,27 +1062,51 @@ class Call extends ChangeNotifier {
     }
     _sendStatus();
     notifyListeners();
-    unawaited(_applyBlur());
+    unawaited(_applyBackground());
   }
 
-  /// Returns false if blur couldn't be turned on.
-  Future<bool> toggleBlur() async {
-    blurOn = !blurOn;
+  /// Switches what's behind the user. Returns false if it couldn't be shown,
+  /// leaving the background as it was.
+  Future<bool> setBackground(CallBackground wanted) async {
+    final before = background;
+    background = wanted;
     notifyListeners();
-    final ok = await _applyBlur();
-    if (!ok) {
-      blurOn = false;
+    final ok = await _applyBackground();
+    if (!ok && background == wanted) {
+      background = before;
       notifyListeners();
+      await _applyBackground();
     }
     return ok;
   }
 
-  /// Attaches or removes the blur so it runs only while wanted and the camera
-  /// is on. Returns false if it was wanted but the plugin couldn't attach it.
-  Future<bool> _applyBlur() async {
-    final want = blurOn && camOn && !_ended;
+  /// Brings the camera track's processor in line with [background]: it runs
+  /// only while wanted and the camera is on. Returns false if it was wanted
+  /// but couldn't be attached or its picture couldn't be read.
+  Future<bool> _applyBackground() {
+    return _backgroundQueue = _backgroundQueue.then((_) async {
+      try {
+        return await _applyBackgroundNow();
+      } catch (e) {
+        log('call: background failed: $e');
+        return false;
+      }
+    });
+  }
+
+  Future<bool> _applyBackgroundNow() async {
+    final want =
+        camOn && !_ended ? background : CallBackground.none;
     final tracks = _local?.getVideoTracks() ?? const <MediaStreamTrack>[];
-    if (tracks.isEmpty || want == _blurAttached) return true;
+    if (tracks.isEmpty || want == _attached) return true;
+    BackgroundPicture? picture;
+    if (want.isPicture) {
+      picture = await loadPicture(want);
+      if (picture == null) {
+        log('call: background picture unavailable');
+        return false;
+      }
+    }
     var ok = true;
     for (final t in tracks) {
       final id = t.id;
@@ -1081,16 +1114,24 @@ class Call extends ChangeNotifier {
       try {
         final r = await WebRTC.invokeMethod('setBackgroundBlur', {
           'trackId': id,
-          'enabled': want,
+          'enabled': want != CallBackground.none,
+          if (picture != null) ...{
+            'picture': picture.rgba,
+            'width': picture.width,
+            'height': picture.height,
+          },
         });
-        if (want && r != true) ok = false;
+        if (want != CallBackground.none && r != true) ok = false;
       } catch (e) {
-        log('call: background blur failed: $e');
-        ok = !want;
+        log('call: background failed: $e');
+        ok = want == CallBackground.none;
       }
     }
-    _blurAttached = want && ok;
-    if (want) log('call: background blur ${ok ? 'on' : 'unavailable'}');
+    _attached = ok ? want : CallBackground.none;
+    if (want != CallBackground.none) {
+      final kind = want.isPicture ? 'picture' : 'blur';
+      log('call: background $kind ${ok ? 'on' : 'unavailable'}');
+    }
     return ok;
   }
 
@@ -1111,8 +1152,8 @@ class Call extends ChangeNotifier {
       await _dropScreen(s);
     }
     await _publisher?.pc.close();
-    // _ended makes this detach the blur before the track goes.
-    await _applyBlur();
+    // _ended makes this detach the processor before the track goes.
+    await _applyBackground();
     for (final t in _local?.getTracks() ?? <MediaStreamTrack>[]) {
       await t.stop();
     }

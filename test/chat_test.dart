@@ -14,6 +14,7 @@ import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_info.dart';
 import 'package:tala/src/app_menu.dart';
 import 'package:tala/src/avatars.dart';
+import 'package:tala/src/backgrounds.dart';
 import 'package:tala/src/settings.dart';
 import 'package:tala/src/presence.dart';
 import 'package:tala/src/nc_api.dart';
@@ -1997,11 +1998,11 @@ void main() {
           ..accent = accentNamed('green')
           ..messageSound = false
           ..callChatOpen = false
-          ..blurBackground = true;
+          ..callBackground = CallBackground.builtIn[2];
         final again = AppSettings(file: file);
         expect(again.callChatOpen, isFalse);
-        expect(again.blurBackground, isTrue);
-        expect(tempPrefs().blurBackground, isFalse);
+        expect(again.callBackground, CallBackground.builtIn[2]);
+        expect(tempPrefs().callBackground, CallBackground.none);
         expect(again.hideArchived, isTrue);
         expect(again.archivedOpen, isTrue);
         expect(again.themeMode, ThemeMode.dark);

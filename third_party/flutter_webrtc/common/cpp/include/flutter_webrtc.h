@@ -56,7 +56,10 @@ class FlutterWebRTC : public FlutterWebRTCBase,
 #ifdef __linux__
   // Tala: blurs the background of a local camera track, or stops. Returns
   // whether the track is now blurred. Platform thread.
-  bool SetBackgroundBlur(const std::string& track_id, bool enabled);
+  // With a picture (RGBA, rows packed), it goes behind the person instead.
+  bool SetBackgroundBlur(const std::string& track_id, bool enabled,
+                         std::vector<uint8_t> picture = {}, int width = 0,
+                         int height = 0);
 
   // Blur processors by track id. A disposed track's processor is already
   // detached by FlutterWebRTCBase, so stale entries are only freed here.

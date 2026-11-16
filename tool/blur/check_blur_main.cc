@@ -1,6 +1,8 @@
 // Runs Tala's background blur on one raw I420 frame for check_blur.py:
-//   check_blur_main <width> <height> <in.yuv> <out.yuv> [runs]
-// Prints the average time per frame.
+//   check_blur_main <width> <height> <in.yuv> <out.yuv> [runs
+//                   [<picture.rgba> <picture width> <picture height>]]
+// With a picture, it goes behind the person instead of the blur. Prints the
+// average time per frame.
 
 #include <chrono>
 #include <cstdio>
@@ -28,6 +30,15 @@ int main(int argc, char** argv) {
   frame.stride_u = frame.stride_v = cw;
   const int runs = argc > 5 ? std::atoi(argv[5]) : 1;
   tala::BackgroundBlur blur;
+  if (argc > 8) {
+    const int pw = std::atoi(argv[7]), ph = std::atoi(argv[8]);
+    std::vector<uint8_t> rgba(static_cast<size_t>(pw) * ph * 4);
+    FILE* p = std::fopen(argv[6], "rb");
+    if (!p || std::fread(rgba.data(), 1, rgba.size(), p) != rgba.size())
+      return 1;
+    std::fclose(p);
+    blur.SetPicture(rgba, pw, ph);
+  }
   // A few frames first so the mask settles, as it would in a call.
   for (int i = 0; i < 5; i++)
     blur.Apply(frame, out.data(), out.data() + ys, out.data() + ys + cs);

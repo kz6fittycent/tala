@@ -1,10 +1,12 @@
-// Tala: background blur as a libwebrtc video processor. Attached to a camera
-// track by FlutterWebRTC's setBackgroundBlur method; the blur itself is in
-// background_blur.cc.
+// Tala: background blur, or a picture behind the person, as a libwebrtc video
+// processor. Attached to a camera track by FlutterWebRTC's setBackgroundBlur
+// method; the work itself is in background_blur.cc.
 
 #ifndef TALA_BLUR_PROCESSOR_H_
 #define TALA_BLUR_PROCESSOR_H_
 
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include "background_blur.h"
@@ -15,6 +17,16 @@ namespace tala {
 
 class BlurProcessor : public libwebrtc::RTCVideoProcessor {
  public:
+  // From any thread: the picture to show behind the person from the next
+  // frame on (see BackgroundBlur::SetPicture), or empty to blur.
+  void SetPicture(std::vector<uint8_t> rgba, int width, int height) {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_ = std::move(rgba);
+    pending_width_ = width;
+    pending_height_ = height;
+    has_pending_ = true;
+  }
+
   // On the capture thread, one frame at a time.
   libwebrtc::scoped_refptr<libwebrtc::RTCVideoFrame> Process(
       libwebrtc::scoped_refptr<libwebrtc::RTCVideoFrame> frame) override {
@@ -22,6 +34,14 @@ class BlurProcessor : public libwebrtc::RTCVideoProcessor {
     in.width = frame->width();
     in.height = frame->height();
     if (in.width < 2 || in.height < 2) return frame;
+    {
+      std::lock_guard<std::mutex> lock(pending_mutex_);
+      if (has_pending_) {
+        blur_.SetPicture(pending_, pending_width_, pending_height_);
+        std::vector<uint8_t>().swap(pending_);
+        has_pending_ = false;
+      }
+    }
     in.y = frame->DataY();
     in.u = frame->DataU();
     in.v = frame->DataV();
@@ -42,6 +62,10 @@ class BlurProcessor : public libwebrtc::RTCVideoProcessor {
  private:
   BackgroundBlur blur_;
   std::vector<uint8_t> out_;
+  std::mutex pending_mutex_;
+  std::vector<uint8_t> pending_;
+  int pending_width_ = 0, pending_height_ = 0;
+  bool has_pending_ = false;
 };
 
 }  // namespace tala

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
+import 'backgrounds.dart';
 import 'log.dart';
 import 'paths.dart';
 
@@ -23,7 +24,7 @@ class AppSettings extends ChangeNotifier {
   Accent _accent = accents.first;
   bool _messageSound = true;
   bool _callChatOpen = true;
-  bool _blurBackground = false;
+  CallBackground _callBackground = CallBackground.none;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -47,9 +48,10 @@ class AppSettings extends ChangeNotifier {
   bool get callChatOpen => _callChatOpen;
   set callChatOpen(bool value) => _change(() => _callChatOpen = value);
 
-  /// Whether calls start with the background blurred.
-  bool get blurBackground => _blurBackground;
-  set blurBackground(bool value) => _change(() => _blurBackground = value);
+  /// What calls start with behind the user: nothing, a blur or a picture.
+  CallBackground get callBackground => _callBackground;
+  set callBackground(CallBackground value) =>
+      _change(() => _callBackground = value);
 
   void _change(VoidCallback apply) {
     apply();
@@ -67,7 +69,12 @@ class AppSettings extends ChangeNotifier {
       _accent = accentNamed(d['accent'] as String?);
       _messageSound = d['messageSound'] != false;
       _callChatOpen = d['callChatOpen'] != false;
-      _blurBackground = d['blurBackground'] == true;
+      // blurBackground is from before pictures (0.8.x).
+      _callBackground = d['callBackground'] is String
+          ? CallBackground.fromId(d['callBackground'] as String)
+          : d['blurBackground'] == true
+              ? CallBackground.blur
+              : CallBackground.none;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
@@ -92,7 +99,7 @@ class AppSettings extends ChangeNotifier {
         'accent': _accent.name,
         'messageSound': _messageSound,
         'callChatOpen': _callChatOpen,
-        'blurBackground': _blurBackground,
+        'callBackground': _callBackground.id,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

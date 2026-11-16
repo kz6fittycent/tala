@@ -1,4 +1,5 @@
-// Blurs everything but the person in camera frames.
+// Blurs everything but the person in camera frames, or puts a picture
+// behind them instead.
 //
 // Works on I420 planes and knows nothing of WebRTC, so it builds and can be
 // checked on its own (tool/blur/check_blur.py); flutter_webrtc.cc wraps it in
@@ -29,8 +30,15 @@ class BackgroundBlur {
   // Call from one thread at a time.
   void Apply(const I420& in, uint8_t* out_y, uint8_t* out_u, uint8_t* out_v);
 
+  // Shows `rgba` (width by height, 4 bytes a pixel, rows packed) behind the
+  // person instead of blurring, filling the frame and cropped to its shape.
+  // An empty picture goes back to blurring. Same thread as Apply.
+  void SetPicture(const std::vector<uint8_t>& rgba, int width, int height);
+
  private:
   void Segment(const I420& in);
+  // Scales the picture to cover a frame of this size, into picture_scaled_.
+  void FitPicture(int width, int height);
 
   SelfieSegmenter segmenter_;
   std::vector<float> rgb_;
@@ -41,6 +49,13 @@ class BackgroundBlur {
   std::vector<float> guide_, refined_, weight_;
   std::vector<float> small_[3];
   std::vector<float> scratch_;
+  // The picture in Y, U and V at its own size, all three full resolution;
+  // empty when blurring.
+  std::vector<float> picture_[3];
+  int picture_width_ = 0, picture_height_ = 0;
+  // picture_ fitted to the frame: Y at frame size, U and V at chroma size.
+  std::vector<float> picture_scaled_[3];
+  int scaled_width_ = 0, scaled_height_ = 0;  // frame size they belong to
 };
 
 }  // namespace tala

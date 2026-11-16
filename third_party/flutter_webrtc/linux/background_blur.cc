@@ -30,6 +30,11 @@ constexpr int kSmallWidth = 160;
 constexpr int kBlurRadius = 3;  // in small pixels, three box passes
 constexpr int kBlurPasses = 3;
 
+// With a picture behind the person, mask values below this count as
+// background: the model's unsure fringe carries the real room's color, which
+// shows as a halo against a different picture. Blurring hides it.
+constexpr float kPictureCut = 0.3f;
+
 uint8_t Clamp8(float v) {
   return static_cast<uint8_t>(std::min(std::max(v + 0.5f, 0.0f), 255.0f));
 }
@@ -119,7 +124,7 @@ void VerticalLerp(const float* p, int w, int h, int y0, float fy, float* out) {
 }
 
 // Blends one plane: the person (mask near 1) from `in`, the rest from the
-// blurred `small` copy. Each row is first interpolated vertically from the
+// blurred `small` copy (or the picture, at full size). Each row is first interpolated vertically from the
 // mask and the small copy, leaving one lerp a pixel along the row.
 void Blend(const uint8_t* in, int stride, int w, int h,
            const std::vector<float>& small, int sw, int sh,
@@ -198,7 +203,79 @@ void GuidedFilter(const std::vector<float>& g, std::vector<float>& p, int w,
   }
 }
 
+// Bilinear sample positions along one axis of a crop starting at `start` and
+// `length` long in a `from`-long source, for `to` output pixels.
+void CropAxis(int to, float start, float length, int from, std::vector<int>& lo,
+              std::vector<float>& frac) {
+  lo.resize(to);
+  frac.resize(to);
+  const float scale = length / to;
+  for (int i = 0; i < to; i++) {
+    const float f = std::min(std::max(start + (i + 0.5f) * scale - 0.5f, 0.0f),
+                             static_cast<float>(from - 1));
+    lo[i] = std::min(static_cast<int>(f), from - 2 < 0 ? 0 : from - 2);
+    frac[i] = from > 1 ? f - lo[i] : 0.0f;
+  }
+}
+
 }  // namespace
+
+void BackgroundBlur::SetPicture(const std::vector<uint8_t>& rgba, int width,
+                                int height) {
+  scaled_width_ = scaled_height_ = 0;
+  if (width < 2 || height < 2 ||
+      rgba.size() < static_cast<size_t>(width) * height * 4) {
+    for (auto& p : picture_) p.clear();
+    picture_width_ = picture_height_ = 0;
+    return;
+  }
+  const size_t n = static_cast<size_t>(width) * height;
+  for (auto& p : picture_) p.resize(n);
+  // BT.601 limited range, as the camera's frames are.
+  for (size_t i = 0; i < n; i++) {
+    const float r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
+    picture_[0][i] = 16 + 0.257f * r + 0.504f * g + 0.098f * b;
+    picture_[1][i] = 128 - 0.148f * r - 0.291f * g + 0.439f * b;
+    picture_[2][i] = 128 + 0.439f * r - 0.368f * g - 0.071f * b;
+  }
+  picture_width_ = width;
+  picture_height_ = height;
+}
+
+void BackgroundBlur::FitPicture(int width, int height) {
+  if (scaled_width_ == width && scaled_height_ == height) return;
+  const float pw = picture_width_, ph = picture_height_;
+  // The largest centered part of the picture with the frame's shape.
+  float crop_w = pw, crop_h = ph;
+  if (pw * height > ph * width) {
+    crop_w = ph * width / height;
+  } else {
+    crop_h = pw * height / width;
+  }
+  const float x0 = (pw - crop_w) / 2, y0 = (ph - crop_h) / 2;
+  const int cw = (width + 1) / 2, ch = (height + 1) / 2;
+  for (int i = 0; i < 3; i++) {
+    const int ow = i == 0 ? width : cw, oh = i == 0 ? height : ch;
+    std::vector<int> xs, ys;
+    std::vector<float> fx, fy;
+    CropAxis(ow, x0, crop_w, picture_width_, xs, fx);
+    CropAxis(oh, y0, crop_h, picture_height_, ys, fy);
+    auto& out = picture_scaled_[i];
+    out.resize(static_cast<size_t>(ow) * oh);
+    std::vector<float> row(picture_width_);
+    for (int y = 0; y < oh; y++) {
+      VerticalLerp(picture_[i].data(), picture_width_, picture_height_, ys[y],
+                   fy[y], row.data());
+      float* o = &out[static_cast<size_t>(y) * ow];
+      for (int x = 0; x < ow; x++) {
+        const int a = xs[x], b = std::min(a + 1, picture_width_ - 1);
+        o[x] = row[a] + (row[b] - row[a]) * fx[x];
+      }
+    }
+  }
+  scaled_width_ = width;
+  scaled_height_ = height;
+}
 
 void BackgroundBlur::Segment(const I420& in) {
   rgb_.resize(static_cast<size_t>(kMaskW) * kMaskH * 3);
@@ -243,8 +320,24 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
   // into sharp cutouts.
   for (float& v : refined_) v = v * v * (3 - 2 * v);
 
-  const int factor = std::max(1, in.width / kSmallWidth);
   const int cw = (in.width + 1) / 2, ch = (in.height + 1) / 2;
+  if (picture_width_ > 0) {
+    for (float& v : refined_) {
+      v = std::max(0.0f, (v - kPictureCut) / (1 - kPictureCut));
+    }
+    FitPicture(in.width, in.height);
+    const uint8_t* planes[3] = {in.y, in.u, in.v};
+    const int strides[3] = {in.stride_y, in.stride_u, in.stride_v};
+    uint8_t* outs[3] = {out_y, out_u, out_v};
+    for (int i = 0; i < 3; i++) {
+      const int w = i == 0 ? in.width : cw, h = i == 0 ? in.height : ch;
+      Blend(planes[i], strides[i], w, h, picture_scaled_[i], w, h, refined_,
+            gw, gh, outs[i]);
+    }
+    return;
+  }
+
+  const int factor = std::max(1, in.width / kSmallWidth);
   const uint8_t* planes[3] = {in.y, in.u, in.v};
   const int strides[3] = {in.stride_y, in.stride_u, in.stride_v};
   const int widths[3] = {in.width, cw, cw};
