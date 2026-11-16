@@ -4,7 +4,9 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 
 Status and decisions are kept in this file.
 
-## Where things stand (2026-11-10)
+## Where things stand (2026-11-16)
+0.9.0 (pushed 2026-11-16, for candidate): pictures behind the person in calls (see Background blur), typing indicators (see Typing), a featured banner for the store, and an auto-connect request drafted for the user to post. Not yet tried by the user.
+
 0.8.2 went to stable on 2026-11-10 (the user promoting). It carries everything since 0.6.1: the 0.7.0 features (read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence, an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions, polls; see "Added 2026-11-10"), then drag and drop fixed in the snap (0.7.1: `home` and `removable-media` plugs, portal targets first), own status no longer turned off by a never-set status (0.7.2), the user's avatar with status dot as the menu button (0.8.0), and background blur (0.8.1, smoother edges in 0.8.2; see Calls). 0.7.0 was set by hand; `bump_version.sh` counts x.y.0 to x.y.2, then the next minor, so 0.7.2 became 0.8.0 (the 0.8.0 commit is titled "Release 0.7.3" by mistake). The README and wiki were updated for all of it.
 
 Settled, not open: on skyfire GNOME's "not responding" dialog appears during calls; the user puts it down to the slow Logitech QuickCam 3000 (not seen on Brawn, which has a modern camera). Don't propose investigating it (the user, 2026-11-16).
