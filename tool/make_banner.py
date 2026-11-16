@@ -110,8 +110,8 @@ def main():
            fill='white')
     d.text((left, 690), 'on your Linux desktop', font=font(76, 600),
            fill='white')
-    d.text((left, 815), 'Screen sharing · Backgrounds · Polls',
-           font=font(44, 400), fill=(170, 205, 230))
+    d.text((left, 815), 'Your server. Your voice. Your desktop.',
+           font=font(48, 500), fill=(170, 205, 230))
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     base.convert('RGB').save(OUT, quality=93, optimize=True, subsampling=0)
