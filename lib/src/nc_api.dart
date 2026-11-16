@@ -204,6 +204,7 @@ class Member {
     required this.actorId,
     required this.name,
     required this.participantType,
+    this.sessionIds = const [],
   });
 
   factory Member.fromJson(Map<String, dynamic> j) => Member(
@@ -212,6 +213,10 @@ class Member {
     actorId: j['actorId'] as String? ?? '',
     name: j['displayName'] as String? ?? '',
     participantType: j['participantType'] as int? ?? 3,
+    sessionIds: [
+      for (final id in (j['sessionIds'] as List? ?? const []))
+        if (id is String && id != '0') id,
+    ],
   );
 
   final int attendeeId;
@@ -223,6 +228,9 @@ class Member {
 
   /// 1 owner, 2 moderator, 3 user, 4 guest, 5 joined by link, 6 guest moderator.
   final int participantType;
+
+  /// Their sessions in the conversation now, one per open client.
+  final List<String> sessionIds;
 
   bool get isOwner => participantType == 1;
   bool get isModerator => const {1, 2, 6}.contains(participantType);
@@ -911,8 +919,14 @@ class NcApi implements CallSource, ChatSource {
     return out.takeBytes();
   }
 
+  /// [jar] keeps a room session's cookies apart from the main ones, so a
+  /// second session in the same conversation (typing, beside a call) can't
+  /// replace or end the first.
   Future<dynamic> _ocs(String method, String path,
-      {Map<String, dynamic>? body, HttpClient? via}) async {
+      {Map<String, dynamic>? body,
+      HttpClient? via,
+      Map<String, Cookie>? jar}) async {
+    final cookies = jar ?? _cookies;
     final uri = Uri.parse('${creds.server}$path');
     final req = await (via ?? _http).openUrl(method, uri);
     req.headers
@@ -920,14 +934,14 @@ class NcApi implements CallSource, ChatSource {
       ..set('Accept', 'application/json')
       ..set('Authorization',
           'Basic ${base64.encode(utf8.encode('${creds.user}:${creds.appPassword}'))}');
-    req.cookies.addAll(_cookies.values);
+    req.cookies.addAll(cookies.values);
     if (body != null) {
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(body));
     }
     final res = await req.close();
     for (final c in res.cookies) {
-      _cookies[c.name] = c;
+      cookies[c.name] = c;
     }
     final text = await res.transform(utf8.decoder).join();
     if (res.statusCode >= 300) throw ApiException(res.statusCode, path);
@@ -1090,24 +1104,53 @@ class NcApi implements CallSource, ChatSource {
 
   /// Internal signaling's long poll, which the server holds for up to 30s. The
   /// server finds the session through the cookies set when joining the room.
-  Future<Object?> pullSignaling(String token, HttpClient client) =>
-      _ocs('GET', '$_talkV3/signaling/$token', via: client)
+  Future<Object?> pullSignaling(String token, HttpClient client,
+          {Map<String, Cookie>? jar}) =>
+      _ocs('GET', '$_talkV3/signaling/$token', via: client, jar: jar)
           .timeout(const Duration(seconds: 45));
 
-  Future<void> sendSignaling(String token, String messages) =>
-      _ocs('POST', '$_talkV3/signaling/$token', body: {'messages': messages});
+  Future<void> sendSignaling(String token, String messages,
+          {Map<String, Cookie>? jar}) =>
+      _ocs('POST', '$_talkV3/signaling/$token',
+          body: {'messages': messages}, jar: jar);
 
   String get signalingBackendUrl => '${creds.server}$_talkV3/signaling/backend';
 
   /// Returns the Nextcloud session id.
-  Future<String> joinRoom(String token) async {
+  ///
+  /// A fresh [jar] gets a request first: when the join is a new session's
+  /// first request, the server changes the session id partway through it and
+  /// the room session is lost (the next signaling poll is a 404; seen on
+  /// Talk 25).
+  Future<String> joinRoom(String token, {Map<String, Cookie>? jar}) async {
+    if (jar != null && jar.isEmpty) {
+      await _ocs('GET', '$_talkV4/room/$token', jar: jar);
+    }
     final d = await _ocs('POST', '$_talkV4/room/$token/participants/active',
-        body: {'force': true});
+        body: {'force': true}, jar: jar);
     return d['sessionId'] as String;
   }
 
-  Future<void> leaveRoom(String token) =>
-      _ocs('DELETE', '$_talkV4/room/$token/participants/active');
+  Future<void> leaveRoom(String token, {Map<String, Cookie>? jar}) =>
+      _ocs('DELETE', '$_talkV4/room/$token/participants/active', jar: jar);
+
+  bool? _typingAllowed;
+
+  /// Whether typing may be shown and sent: the server knows typing signals
+  /// and the user hasn't made their typing private (which also hides
+  /// others'). Read once a run.
+  Future<bool> typingAllowed() async {
+    final known = _typingAllowed;
+    if (known != null) return known;
+    final d = await _ocs('GET', '/ocs/v2.php/cloud/capabilities');
+    final talk = d['capabilities']?['spreed'];
+    final features = talk is Map ? talk['features'] : null;
+    final privacy =
+        talk is Map ? (talk['config']?['chat']?['typing-privacy']) : null;
+    return _typingAllowed = features is List &&
+        features.contains('typing-privacy') &&
+        privacy == 0;
+  }
 
   Future<void> joinCall(String token, int flags) =>
       _ocs('POST', '$_talkV4/call/$token', body: {'flags': flags});

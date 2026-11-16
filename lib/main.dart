@@ -28,6 +28,7 @@ import 'src/new_conversation.dart';
 import 'src/presence.dart';
 import 'src/ringer.dart';
 import 'src/settings.dart';
+import 'src/typing.dart';
 import 'src/tray.dart';
 import 'src/tray_selftest.dart';
 import 'src/selftest.dart';
@@ -1082,6 +1083,7 @@ class _RoomsPageState extends State<RoomsPage> {
                   onSearch: () => _search(room: selected),
                   avatars: widget.api.avatars,
                   polls: widget.api.polls,
+                  typing: (room) => TypingSession(widget.api, room),
                 ),
         ),
       ),
@@ -1248,6 +1250,7 @@ class _CallPageState extends State<CallPage> {
                     showHeader: false,
                     avatars: widget.api.avatars,
                     polls: widget.api.polls,
+                    typing: (room) => TypingSession(widget.api, room),
                     onBack: () {},
                     onCall: () {},
                   )

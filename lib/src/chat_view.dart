@@ -18,6 +18,7 @@ import 'nc_api.dart';
 import 'polls.dart';
 import 'presence.dart';
 import 'settings.dart';
+import 'typing.dart';
 
 /// Below this the two panes don't both fit, so one shows at a time. Larger
 /// text never hides the conversation list while there's room for it.
@@ -549,8 +550,13 @@ class ConversationPane extends StatefulWidget {
     this.onSearch,
     this.avatars,
     this.polls,
+    this.typing,
     this.showHeader = true,
   });
+
+  /// Makes the conversation's typing session; null leaves typing out, as in
+  /// tests.
+  final TypingSession Function(Room room)? typing;
 
   /// Null leaves polls closed to opening or creating, as in tests.
   final PollSource? polls;
@@ -580,6 +586,8 @@ class _ConversationPaneState extends State<ConversationPane> {
     lastRead: widget.room.lastRead,
   );
   late final AppLifecycleListener _lifecycle;
+  late final TypingSession? _typing = widget.typing?.call(widget.room);
+  String _typedText = '';
 
   /// Fixed when the conversation opens, so the divider stays put as it's read.
   late final int _lastReadAtOpen = widget.room.lastRead;
@@ -701,6 +709,9 @@ class _ConversationPaneState extends State<ConversationPane> {
     _thread
       ..active = state == null || state == AppLifecycleState.resumed
       ..start();
+    _typing?.active = state == null || state == AppLifecycleState.resumed;
+    _typedText = _input.text;
+    _input.addListener(_onTextChanged);
     _scroll.addListener(_onScroll);
     FileDrops.instance.addTarget(_onDrop);
     _input.addListener(_updateMention);
@@ -852,8 +863,19 @@ class _ConversationPaneState extends State<ConversationPane> {
     }
   }
 
-  void _onLifecycle(AppLifecycleState state) =>
-      _thread.active = state == AppLifecycleState.resumed;
+  void _onLifecycle(AppLifecycleState state) {
+    _thread.active = state == AppLifecycleState.resumed;
+    _typing?.active = state == AppLifecycleState.resumed;
+  }
+
+  /// Others see the user typing while there's text being written, not while
+  /// editing an old message or just moving the cursor.
+  void _onTextChanged() {
+    final text = _input.text;
+    if (text == _typedText) return;
+    _typedText = text;
+    _typing?.typing(_editing == null && text.trim().isNotEmpty);
+  }
 
   /// The list is reversed, so its far end is the oldest message.
   void _onScroll() {
@@ -908,6 +930,7 @@ class _ConversationPaneState extends State<ConversationPane> {
   void dispose() {
     FileDrops.instance.removeTarget(_onDrop);
     _lifecycle.dispose();
+    _typing?.dispose();
     _thread.dispose();
     _mentionTimer?.cancel();
     _input.dispose();
@@ -1016,6 +1039,11 @@ class _ConversationPaneState extends State<ConversationPane> {
           if (_thread.problem != null) _Banner(_thread.problem!),
           Expanded(child: _body(context)),
           if (room.canChat && !_thread.gone) ...[
+            if (_typing case final typing?)
+              ListenableBuilder(
+                listenable: typing,
+                builder: (context, _) => _TypingLine(typingLine(typing.names)),
+              ),
             if (_editing != null)
               _ComposerBar(
                 text: 'Editing your message',
@@ -1253,6 +1281,38 @@ class _MentionList extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Who else is typing, just above the composer; takes no room when nobody is.
+class _TypingLine extends StatelessWidget {
+  const _TypingLine(this.text);
+  final String? text;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = this.text;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 150),
+      alignment: Alignment.bottomLeft,
+      child: text == null
+          ? const SizedBox(width: double.infinity)
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            ),
     );
   }
 }

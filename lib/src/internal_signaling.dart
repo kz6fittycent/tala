@@ -9,9 +9,12 @@ import 'signaling.dart';
 
 /// One session in the conversation, from a `usersInRoom` list.
 class SignalingUser {
-  const SignalingUser(this.sessionId, this.inCall);
+  const SignalingUser(this.sessionId, this.inCall, {this.userId});
   final String sessionId;
   final int inCall;
+
+  /// For users with an account; guests have none.
+  final String? userId;
 }
 
 /// What the server's `usersInRoom` and `message` entries mean for a call. Parses
@@ -39,6 +42,9 @@ void readPull(
                 u['inCall'] is int
                     ? u['inCall'] as int
                     : (u['inCall'] == true ? 1 : 0),
+                userId: u['userId'] is String && u['userId'] != ''
+                    ? u['userId'] as String
+                    : null,
               ),
         ]);
       default:
@@ -64,12 +70,15 @@ String? pullFailureEnds(int? status) => switch (status) {
 /// Backend: messages go out by POST and arrive by long poll. See Talk's
 /// docs/signaling-messages.md. The session is the one from joining the room.
 class InternalSignaling implements CallSignaling {
-  InternalSignaling(this._api, this._token, this.sessionId);
+  InternalSignaling(this._api, this._token, this.sessionId, {this.jar});
 
   static const _maxFailures = 30;
 
   final NcApi _api;
   final String _token;
+
+  /// The cookies of the room session this belongs to, when not the main ones.
+  final Map<String, Cookie>? jar;
 
   /// The long poll has its own client so hanging up can cut it off at once.
   final HttpClient _pullClient = HttpClient();
@@ -94,7 +103,7 @@ class InternalSignaling implements CallSignaling {
   Future<void> _pull() async {
     while (!_closed) {
       try {
-        final data = await _api.pullSignaling(_token, _pullClient);
+        final data = await _api.pullSignaling(_token, _pullClient, jar: jar);
         _failures = 0;
         if (_closed) return;
         readPull(
@@ -145,7 +154,7 @@ class InternalSignaling implements CallSignaling {
       while (_outgoing.isNotEmpty && !_closed) {
         final batch = List.of(_outgoing);
         try {
-          await _api.sendSignaling(_token, jsonEncode(batch));
+          await _api.sendSignaling(_token, jsonEncode(batch), jar: jar);
           _outgoing.removeRange(0, batch.length);
           tries = 0;
         } catch (e) {

@@ -12,7 +12,6 @@ Settled, not open: on skyfire GNOME's "not responding" dialog appears during cal
 The user's direction (2026-11-10): untested areas (calls with more than three people, a real no-HPB server across networks, real federation) are left to reports from users in the field.
 
 Not built, by choice so far:
-- Typing indicators: they travel over signaling, and Tala only connects to signaling during calls. Joining the room just to view chat would change how the server treats the user (active sessions), so it needs thought first.
 - Voice messages: they show as file links. Playing them needs an audio decoder, and recording needs mic capture to a file; both mean new dependencies.
 - Search jumping into the live chat (see Message search).
 
@@ -41,7 +40,7 @@ Public at https://github.com/kz6fittycent/tala, branch `main`. Commit freely; pu
 
 Workflows copy XBTune's, without Windows. `snap-builds.yml` tests, builds and uploads the .snap. `call-for-testing.yml` publishes to candidate when the repo variable `TALA_STORE_PUBLISH` is `true` and pubspec's version is newer than the store's (`tool/bump_version.sh`). `promote-to-stable.yml` runs on a `/promote` comment from the owner or a collaborator, in the `promote-stable` environment: `main` only, no required reviewer, because the comment is the approval (the user's decision, 2026-11-07; a reviewer rule made 0.6.1's promote wait). `security-rebuild.yml` rebuilds stable. The user watches builds themselves.
 
-Store: the listing has the icon and screenshots; the featured banner (3:1, under 2 MB) is `docs/store/featured-banner.jpg` from `tool/make_banner.py`, uploaded by the user; `donation:` is in the recipe, and the license is AGPL-3.0-or-later. A release doesn't update the store's license field: the user changes it in the snapcraft.io dashboard. No store auto-connect requests (the user's call, 2026-11-06): users connect camera, audio-record, password-manager-service and removable-media by hand.
+Store: the listing has the icon and screenshots; the featured banner (3:1, under 2 MB) is `docs/store/featured-banner.jpg` from `tool/make_banner.py`, uploaded by the user; `donation:` is in the recipe, and the license is AGPL-3.0-or-later. A release doesn't update the store's license field: the user changes it in the snapcraft.io dashboard. Auto-connect: the user changed course on 2026-11-16 and is posting a forum request (store-requests) for camera, audio-record, password-manager-service and removable-media; until it's granted, users connect them by hand.
 
 Licenses: `LICENSE` holds the AGPL v3 text, then a section stating or-later and the FFmpeg notice. libwebrtc contains FFmpeg (LGPL) and H.264 code; the user decided on 2026-11-07 that H.264 stays, as with HandBrake. `tool/make_webrtc_licenses.py` writes `assets/licenses/libwebrtc.txt` and `lib/src/licenses.dart` registers it. When `binary_version` changes, rerun that script, recheck its list, and update the release and FFmpeg revision at the end of `LICENSE` (the revision comes from `m150_release`'s DEPS, not a record of the build).
 
@@ -88,6 +87,9 @@ Typing `@` at a word's start lists matches from `GET chat/{token}/mentions` (wit
 
 ### Avatars
 `lib/src/avatars.dart`. Only chosen user pictures (`X-NC-IsCustomAvatar: 1`) and raster room pictures are shown; everything else, including emoji and SVG room avatars, guests and federated people, gets a letter in the accent color (19px bold). User pictures recheck hourly, room pictures when `avatarVersion` changes; nothing is on disk.
+
+### Typing
+`lib/src/typing.dart` (the user's go-ahead, 2026-11-16). `startedTyping`/`stoppedTyping` to every other session over signaling, as the web client's `SignalingTypingHandler.js`; only when the capability `typing-privacy` is there and the user's `config.chat.typing-privacy` is 0 (private hides others' too). Needs a room session, and the server sends no ordinary-message notifications to a user with an active session in that room, on any device (spreed `Notifier::shouldParticipantBeNotified`). So `TypingSession` joins only while the window is focused (`AppLifecycleState.resumed`) with that conversation open, 1s after focus, and leaves at once on losing it; Tala's own popups for that conversation are unaffected. Its own cookie jar (`jar:` on `joinRoom`, `leaveRoom`, `pullSignaling`, `sendSignaling`), so it and a call's session can't end each other. A fresh jar gets a GET before the join: a join as a new PHP session's first request loses the room session (next poll 404, Talk 25). Names: the HPB's join event, else `members()` `sessionIds`, else "Someone". Own sessions on other devices are ignored. Federated rooms get none. `tool/typing_check.dart` runs two sessions against a throwaway no-HPB server (passed on Talk 25.0.8, 2026-11-16); the HPB path and the web client seeing Tala type are untested.
 
 ### Message search
 `lib/src/search.dart`: unified search (`search/providers/talk-message/search`), all conversations or one, 400ms pause, latest wins, "Show more" after a full page of 20. A result opens `MessageContextDialog` with up to 15 messages each side (`chat/{token}/{id}/context`) instead of jumping in the live chat, which could mean loading thousands of messages (my choice, flagged to the user). A server without `chat-get-context` shows "Couldn't load this message".
