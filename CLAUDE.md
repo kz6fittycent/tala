@@ -27,6 +27,10 @@ Trademark (settled by the user 2026-11-07): keep "Nextcloud" out of the name, ex
 References: spreed `docs/internal-signaling.md`, `docs/call.md`, Talk's `openapi-full.json` (some endpoints aren't in the docs); strukturag `docs/standalone-signaling-api-v1.md`; the Android client's `signaling/` and `webrtc/`.
 
 ## Building and checking
+
+- **Grype** (`.github/workflows/grype.yml`, added 2026-11-18): on pushes, PRs and
+  weekly, it fails on high or critical CVEs with a fix and uploads SARIF to the
+  Security tab.
 - `flutter build linux --release --no-tree-shake-icons`. The flag is required: on Flutter 3.47.4 the trimmed icon font lost one used icon per build (cause not established; widget tests can't catch it). The full font adds about 1.6 MB.
 - Builds need `libayatana-appindicator3-dev`, `libsecret-1-dev` and `libpipewire-0.3-dev`. None are installed on skyfire, so full local builds fail there; tests and the analyzer work (`flutter test`, `flutter analyze lib test tool`). A single runner file can be compile-checked with `g++ -std=c++17 -c <file> -Ilinux/flutter/ephemeral $(pkg-config --cflags gtk+-3.0)`.
 - Snaps build on GitHub only. `tool/get-flutter.sh` pins Flutter by version and commit for the snap and CI.
