@@ -7,6 +7,7 @@ import 'app_info.dart';
 import 'avatars.dart';
 import 'chat.dart';
 import 'chat_alerts.dart';
+import 'giphy.dart';
 import 'incoming_calls.dart';
 import 'log.dart';
 import 'mentions.dart';
@@ -796,6 +797,134 @@ class NcApi implements CallSource, ChatSource {
   );
 
   static const _maxPreviewBytes = 20 * 1024 * 1024;
+
+  late final GifSource gifs = GifSource(
+    support: gifSupport,
+    search: searchGifs,
+    media: gifMedia,
+    forLink: gifForLink,
+  );
+
+  Future<GifSupport>? _gifSupport;
+
+  /// Read once a run, from the Giphy app's capability. A failed read is
+  /// tried again next time.
+  Future<GifSupport> gifSupport() => _gifSupport ??= () async {
+    try {
+      final d = await _ocs('GET', '/ocs/v2.php/cloud/capabilities');
+      final giphy = d['capabilities']?['integration_giphy'];
+      if (giphy is! Map || giphy['enabled'] != true) return GifSupport.none;
+      return giphy['configured'] == true
+          ? GifSupport.ready
+          : GifSupport.unconfigured;
+    } catch (e) {
+      log('gifs: capabilities: $e');
+      _gifSupport = null;
+      return GifSupport.none;
+    }
+  }();
+
+  /// Recent pages, so going back over a search or reopening trending doesn't
+  /// spend the server's hourly Giphy calls again.
+  final Map<String, (DateTime, GifPage)> _gifPages = {};
+
+  Future<GifPage> searchGifs(String term, int cursor) async {
+    final key = '$cursor:$term';
+    final now = DateTime.now();
+    final known = _gifPages[key];
+    if (known != null && now.difference(known.$1).inMinutes < 10) {
+      return known.$2;
+    }
+    final query = Uri(queryParameters: {
+      if (term.isNotEmpty) 'term': term,
+      'cursor': '$cursor',
+      'limit': '${GifPage.size}',
+    }).query;
+    final kind = term.isEmpty ? 'trending' : 'search';
+    final d = await _ocs(
+      'GET',
+      '/ocs/v2.php/apps/integration_giphy/api/v1/gifs/$kind?$query',
+    );
+    final page = GifPage.fromJson(d, cursor);
+    _gifPages.remove(key);
+    _gifPages[key] = (now, page);
+    while (_gifPages.length > 40) {
+      _gifPages.remove(_gifPages.keys.first);
+    }
+    return page;
+  }
+
+  static const _maxGifBytes = 8 * 1024 * 1024;
+
+  /// A picture the Giphy app passes on. [path] comes from
+  /// [giphyMediaPath] or [gifPathFromRichObject], so it's always the app's
+  /// picture route on this server.
+  Future<Uint8List> gifMedia(String path) async {
+    final webp = webpPath(path);
+    if (webp != null) {
+      try {
+        return await _gifBytes(webp);
+      } catch (_) {
+        // Not every picture has a WebP copy; the GIF it is.
+      }
+    }
+    return _gifBytes(path);
+  }
+
+  Future<Uint8List> _gifBytes(String path) async {
+    final req = await _http.getUrl(Uri.parse('${creds.server}$path'));
+    _authHeaders(req);
+    final res = await req.close();
+    final type = res.headers.contentType;
+    if (res.statusCode >= 300 || type == null || type.primaryType != 'image') {
+      await res.drain<void>();
+      throw ApiException(res.statusCode, 'giphy media');
+    }
+    final out = BytesBuilder(copy: false);
+    await for (final chunk in res) {
+      out.add(chunk);
+      if (out.length > _maxGifBytes) throw ApiException(413, 'giphy media');
+    }
+    return out.takeBytes();
+  }
+
+  final Map<String, Future<Uint8List?>> _linkedGifs = {};
+
+  /// The picture for a giphy link in a message, through the server's link
+  /// previews, which it caches, so showing a GIF again costs no Giphy call.
+  /// Null when the server's Giphy app doesn't preview it.
+  Future<Uint8List?> gifForLink(String link) {
+    final known = _linkedGifs.remove(link);
+    final result = known ?? _gifForLink(link);
+    _linkedGifs[link] = result;
+    while (_linkedGifs.length > 100) {
+      _linkedGifs.remove(_linkedGifs.keys.first);
+    }
+    return result;
+  }
+
+  Future<Uint8List?> _gifForLink(String link) async {
+    try {
+      if (await gifSupport() != GifSupport.ready) return null;
+      final d = await _ocs(
+        'GET',
+        '/ocs/v2.php/references/resolve?'
+            'reference=${Uri.encodeQueryComponent(link)}',
+      );
+      final refs = d is Map ? d['references'] : null;
+      final ref = refs is Map ? refs[link] : null;
+      if (ref is! Map || ref['richObjectType'] != 'integration_giphy_gif') {
+        return null;
+      }
+      final path = gifPathFromRichObject(ref['richObject']);
+      return path == null ? null : await gifMedia(path);
+    } catch (e) {
+      log('gifs: link preview failed: ${e is ApiException ? e.status : e.runtimeType}');
+      // Tried again the next time it's shown.
+      _linkedGifs.remove(link);
+      return null;
+    }
+  }
 
   @override
   Future<List<MentionOption>> chatMentions(String token, String search) async {

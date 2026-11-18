@@ -29,6 +29,11 @@ The people and conversations in these pictures are made up.
   choose moderators, rename and describe them
 - Online, away and Do not disturb status, yours (on your avatar at the top,
   as on the web) and other people's, when the server's User status app is on
+- GIFs: type `/giphy` and what you're after, then pick from moving
+  previews. Search goes through your server's
+  [Giphy integration](https://apps.nextcloud.com/apps/integration_giphy) app,
+  which holds the Giphy key and passes the pictures on, so Tala never contacts
+  Giphy. GIFs others send play in the chat too
 - Drafts kept across restarts
 - Invite people with no account using a link or an email invitation (guests join
   in their browser)

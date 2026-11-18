@@ -10,6 +10,7 @@ import 'avatars.dart';
 import 'chat.dart';
 import 'drafts.dart';
 import 'emoji_picker.dart';
+import 'giphy.dart';
 import 'file_drop.dart';
 import 'log.dart';
 import 'markdown.dart';
@@ -550,9 +551,14 @@ class ConversationPane extends StatefulWidget {
     this.onSearch,
     this.avatars,
     this.polls,
+    this.gifs,
     this.typing,
     this.showHeader = true,
   });
+
+  /// GIF search through the server; null leaves `/giphy` as plain text and
+  /// GIF links as links, as in tests.
+  final GifSource? gifs;
 
   /// Makes the conversation's typing session; null leaves typing out, as in
   /// tests.
@@ -715,6 +721,12 @@ class _ConversationPaneState extends State<ConversationPane> {
     _scroll.addListener(_onScroll);
     FileDrops.instance.addTarget(_onDrop);
     _input.addListener(_updateMention);
+    _input.addListener(_updateGif);
+    widget.gifs?.support().then((support) {
+      if (!mounted) return;
+      _gifSupport = support;
+      _updateGif();
+    });
     _input.addListener(() {
       if (_editing == null) widget.drafts[widget.room.token] = _input.text;
     });
@@ -724,6 +736,40 @@ class _ConversationPaneState extends State<ConversationPane> {
         setState(() => _canUpload = allowed && !widget.room.isFederated);
       }
     }, onError: (Object e) => log('chat: attachment settings: $e'));
+  }
+
+  /// What the server offers for `/giphy`; null until known.
+  GifSupport? _gifSupport;
+
+  /// The GIF search being typed, while the panel is open.
+  String? _gifTerm;
+
+  /// Escape closes the panel until the command is gone from the composer.
+  bool _gifDismissed = false;
+  final GlobalKey<GifPanelState> _gifPanel = GlobalKey();
+
+  void _updateGif() {
+    final term = _editing == null &&
+            _gifSupport != null &&
+            _gifSupport != GifSupport.none
+        ? gifCommandTerm(_input.text)
+        : null;
+    if (term == null) _gifDismissed = false;
+    final shown = _gifDismissed ? null : term;
+    if (shown != _gifTerm) setState(() => _gifTerm = shown);
+  }
+
+  void _pickGif(GifResult gif) {
+    final reply = _replyTo;
+    _picked.clear();
+    _input.clear();
+    setState(() {
+      _gifTerm = null;
+      _replyTo = null;
+    });
+    _thread.send(gif.link, replyTo: reply?.id);
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _inputFocus.requestFocus();
   }
 
   void _startReply(ChatMessage m) {
@@ -901,6 +947,18 @@ class _ConversationPaneState extends State<ConversationPane> {
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (_gifTerm != null) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        setState(() {
+          _gifDismissed = true;
+          _gifTerm = null;
+        });
+        return KeyEventResult.handled;
+      }
+      final gif = _gifPanel.currentState?.handleKey(event);
+      if (gif != null) return gif;
+    }
     final mention = _onMentionKey(event);
     if (mention != null) return mention;
     if (event is KeyDownEvent &&
@@ -1056,7 +1114,16 @@ class _ConversationPaneState extends State<ConversationPane> {
                 cancelLabel: 'Cancel reply',
                 onCancel: () => setState(() => _replyTo = null),
               ),
-            if (_mentionOptions.isNotEmpty)
+            if ((_gifTerm, widget.gifs, _gifSupport)
+                case (final term?, final gifs?, final support?))
+              GifPanel(
+                key: _gifPanel,
+                source: gifs,
+                support: support,
+                term: term,
+                onPick: _pickGif,
+              )
+            else if (_mentionOptions.isNotEmpty)
               _MentionList(
                 options: _mentionOptions,
                 avatars: widget.avatars,
@@ -1166,6 +1233,7 @@ class _ConversationPaneState extends State<ConversationPane> {
                 onOpenPoll: widget.polls == null ? null : _openPoll,
                 preview: (id) =>
                     _previews[id] ??= widget.source.chatPreview(id),
+                gif: widget.gifs?.forLink,
               ),
       );
       final firstUnread =
@@ -1729,6 +1797,55 @@ class _ImagePreview extends StatelessWidget {
   }
 }
 
+/// A GIF sent as a giphy link, playing. [failed] stands in when the server
+/// doesn't preview it; by default nothing does.
+class _GifPreview extends StatelessWidget {
+  const _GifPreview({required this.link, required this.bytes, this.failed});
+  final String link;
+  final Future<Uint8List?> bytes;
+  final Widget? failed;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
+    future: bytes,
+    builder: (context, snap) {
+      final failure = failed ?? const SizedBox.shrink();
+      if (snap.hasError) return failure;
+      if (snap.connectionState != ConnectionState.done) {
+        return const Padding(
+          padding: EdgeInsets.only(bottom: 4),
+          child: SizedBox(
+            width: 200,
+            height: 150,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        );
+      }
+      final data = snap.data;
+      if (data == null) return failure;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 280, maxHeight: 280),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => openExternal(link),
+              child: Image.memory(
+                data,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                semanticLabel: 'GIF',
+                errorBuilder: (context, _, _) => failure,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.message,
@@ -1744,9 +1861,13 @@ class _MessageBubble extends StatefulWidget {
     required this.preview,
     this.readByAll,
     this.onOpenPoll,
+    this.gif,
   });
 
   final ValueChanged<int>? onOpenPoll;
+
+  /// The moving picture for a giphy link; null shows links as links.
+  final Future<Uint8List?> Function(String link)? gif;
 
   /// For the user's own messages, when the server reports read status.
   final bool? readByAll;
@@ -1771,6 +1892,18 @@ class _MessageBubble extends StatefulWidget {
 
 class _MessageBubbleState extends State<_MessageBubble> {
   bool _hover = false;
+
+  /// The first giphy link, when GIFs can be shown.
+  String? get _gifLink {
+    if (widget.gif == null || widget.message.isDeleted) return null;
+    for (final s in widget.message.segments) {
+      final url = s.url;
+      if (s.kind == SegmentKind.link && url != null && isGiphyLink(url)) {
+        return url;
+      }
+    }
+    return null;
+  }
 
   Future<void> _menu(Offset at) async {
     final message = widget.message;
@@ -1846,7 +1979,22 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     segment: s,
                     bytes: widget.preview(s.previewFileId!),
                   ),
-              if (message.pollId case final poll? when !message.isDeleted)
+              if (_gifLink case final link?
+                  when message.text.trim() != link)
+                _GifPreview(link: link, bytes: widget.gif!(link)),
+              if (_gifLink case final link?
+                  when message.text.trim() == link)
+                _GifPreview(
+                  link: link,
+                  bytes: widget.gif!(link),
+                  failed: _MessageText(
+                    message.segments,
+                    blocks: message.blocks,
+                    italic: message.isDeleted,
+                  ),
+                )
+              else if (message.pollId case final poll?
+                  when !message.isDeleted)
                 _PollCard(
                   question: message.text,
                   onOpen: widget.onOpenPoll == null
