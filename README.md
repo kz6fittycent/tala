@@ -29,8 +29,8 @@ The people and conversations in these pictures are made up.
   choose moderators, rename and describe them
 - Online, away and Do not disturb status, yours (on your avatar at the top,
   as on the web) and other people's, when the server's User status app is on
-- GIFs: type `/giphy` and what you're after, then pick from moving
-  previews. Search goes through your server's
+- GIFs: type `/giphy` (or `/gif`) and what you're after, then pick from
+  moving previews. Search goes through your server's
   [Giphy integration](https://apps.nextcloud.com/apps/integration_giphy) app,
   which holds the Giphy key and passes the pictures on, so Tala never contacts
   Giphy. GIFs others send play in the chat too
@@ -85,8 +85,8 @@ disks.
 | Inviting someone without an account | Creating a group |
 | ![A poll](docs/screenshots/poll.png) | ![Your status](docs/screenshots/status.png) |
 | A poll's results | Choosing your status |
-| ![One-to-one with status](docs/screenshots/one-to-one.png) | |
-| Someone else's status in a one-to-one | |
+| ![One-to-one with status](docs/screenshots/one-to-one.png) | ![GIF search](docs/screenshots/gifs.png) |
+| Someone else's status in a one-to-one | Searching for a GIF with `/giphy` |
 
 More in the [wiki](https://github.com/kz6fittycent/tala/wiki).
 

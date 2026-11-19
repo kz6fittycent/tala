@@ -24,6 +24,7 @@ import 'package:tala/src/mentions.dart';
 import 'package:tala/src/search.dart';
 import 'package:tala/src/chat_view.dart';
 import 'package:tala/src/drafts.dart';
+import 'package:tala/src/giphy.dart';
 import 'package:tala/src/guest_link.dart';
 import 'package:tala/src/nc_api.dart';
 import 'package:tala/src/new_conversation.dart';
@@ -208,7 +209,7 @@ Widget _app(Widget home, {Brightness brightness = Brightness.dark}) =>
       ),
     );
 
-Widget _main() {
+Widget _main({GifSource? gifs}) {
   final settings = AppSettings();
   return Scaffold(
     body: ChatLayout(
@@ -230,10 +231,104 @@ Widget _main() {
         onBack: () {},
         onCall: () {},
         onSearch: () {},
+        gifs: gifs,
       ),
     ),
   );
 }
+
+/// Stand-ins for GIF results: little landscapes drawn here, so no real GIF or
+/// photo appears. Filled in setUpAll, where real async work can run.
+final List<Uint8List> _gifPictures = [];
+
+Future<Uint8List> _landscape(int i) async {
+  const skies = [
+    [Color(0xFF7EC8E3), Color(0xFFFCE38A)],
+    [Color(0xFFFF9A8B), Color(0xFFFFD39B)],
+    [Color(0xFF355C7D), Color(0xFFC06C84)],
+    [Color(0xFF89F7FE), Color(0xFF66A6FF)],
+    [Color(0xFFF6D365), Color(0xFFFDA085)],
+  ];
+  const hills = [
+    Color(0xFF2F5D50),
+    Color(0xFF3E7C59),
+    Color(0xFF4B3F72),
+    Color(0xFF1F4E79),
+    Color(0xFF6B4E31),
+  ];
+  const w = 200.0, h = 150.0;
+  final recorder = ui.PictureRecorder();
+  final c = Canvas(recorder);
+  final sky = skies[i % skies.length];
+  c.drawRect(
+    const Rect.fromLTWH(0, 0, w, h),
+    Paint()
+      ..shader = ui.Gradient.linear(Offset.zero, const Offset(0, h), sky),
+  );
+  c.drawCircle(
+    Offset(40.0 + (i * 37) % 120, 40),
+    16,
+    Paint()..color = const Color(0xFFFFF4C2),
+  );
+  // The second row pairs each sky with other hills.
+  final shift = 2 * (i ~/ skies.length);
+  final far = hills[(i + shift + 2) % hills.length].withValues(alpha: 0.6);
+  final near = hills[(i + shift) % hills.length];
+  final peak = 40.0 + (i * 23) % 100;
+  c.drawPath(
+    Path()
+      ..moveTo(0, h)
+      ..lineTo(0, 95)
+      ..lineTo(peak, 55)
+      ..lineTo(peak + 50, 85)
+      ..lineTo(w, 60)
+      ..lineTo(w, h)
+      ..close(),
+    Paint()..color = far,
+  );
+  c.drawPath(
+    Path()
+      ..moveTo(0, h)
+      ..lineTo(0, 115)
+      ..quadraticBezierTo(w * 0.4, 85 + (i % 3) * 8, w, 110)
+      ..lineTo(w, h)
+      ..close(),
+    Paint()..color = near,
+  );
+  // A trail winding up the near hill.
+  c.drawPath(
+    Path()
+      ..moveTo(w * 0.55, h)
+      ..quadraticBezierTo(w * 0.35, 130, w * 0.5, 108),
+    Paint()
+      ..color = const Color(0xFFE8D8B0)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4,
+  );
+  final image = await recorder.endRecording().toImage(w.toInt(), h.toInt());
+  final png = await image.toByteData(format: ui.ImageByteFormat.png);
+  return png!.buffer.asUint8List();
+}
+
+final _gifSource = GifSource(
+  support: () async => GifSupport.ready,
+  search: (term, cursor) async => GifPage.fromJson({
+    'entries': [
+      for (var i = 0; i < _gifPictures.length; i++)
+        {
+          'thumbnailUrl':
+              'https://cloud.example/index.php/apps/integration_giphy/gif/'
+              'direct/demo$i/media1/200w.gif/cid/200w.gif/g',
+          'title': 'Hiking $i',
+          'resourceUrl': 'https://giphy.com/gifs/hiking-demo$i',
+        },
+    ],
+    'cursor': _gifPictures.length,
+  }, cursor),
+  media: (path) async =>
+      _gifPictures[int.parse(RegExp(r'demo(\d+)').firstMatch(path)!.group(1)!)],
+  forLink: (_) async => null,
+);
 
 /// The same window with another conversation open.
 Widget _mainWith(
@@ -384,6 +479,9 @@ void main() {
       'Roboto-Bold.ttf',
     ]);
     await _loadFont('MaterialIcons', ['MaterialIcons-Regular.otf']);
+    for (var i = 0; i < 10; i++) {
+      _gifPictures.add(await _landscape(i));
+    }
     // Tests have no system fonts, so code would draw as empty boxes without it.
     const mono = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf';
     if (File(mono).existsSync()) {
@@ -528,6 +626,26 @@ void main() {
       then: () async {
         await t.enterText(find.byType(TextField).last, 'Are you coming, @ma');
         await t.pump(const Duration(milliseconds: 300));
+      },
+    );
+  });
+
+  testWidgets('gifs', (t) {
+    return scene(
+      t,
+      'gifs',
+      _main(gifs: _gifSource),
+      then: () async {
+        await t.enterText(find.byType(TextField).last, '/giphy hiking');
+        await t.pump(const Duration(milliseconds: 600));
+        await t.pump();
+        // Pictures decode outside the test's fake clock.
+        for (var i = 0; i < 3; i++) {
+          await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 200)),
+          );
+          await t.pump();
+        }
       },
     );
   });
