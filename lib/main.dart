@@ -100,7 +100,10 @@ Future<void> main(List<String> args) async {
     final seconds = int.parse(env['TALA_CHECK_SECONDS'] ?? '45');
     for (var i = 0; i < seconds ~/ 5; i++) {
       await Future<void>.delayed(const Duration(seconds: 5));
-      log('check: ${call.state}, remotes ${call.remotes.length}, '
+      final people = call.people;
+      log('check: ${call.state}, remotes ${people.length}, '
+          'speaking ${people.where((p) => p.speaking).length}, '
+          'named ${people.where((p) => p.name != null).length}, '
           '${await call.meshStats()}');
     }
     await call.hangUp();
@@ -1236,6 +1239,48 @@ class _CallPageState extends State<CallPage> {
         ),
       );
 
+  /// The person kept large in speaker view, until they're tapped again or
+  /// leave.
+  String? _pinned;
+
+  /// Speaker or grid, how a shared screen sits with people, and whether the
+  /// user's own camera shows, from the call's View button.
+  Widget _viewMenu() {
+    final settings = widget.settings;
+    return MenuAnchor(
+      menuChildren: [
+        for (final v in PeopleView.values)
+          RadioMenuButton<PeopleView>(
+            value: v,
+            groupValue: settings.callPeopleView,
+            onChanged: (v) => setState(() => settings.callPeopleView = v!),
+            child: Text(v.label),
+          ),
+        const Divider(),
+        for (final v in ScreenView.values)
+          RadioMenuButton<ScreenView>(
+            value: v,
+            groupValue: settings.callScreenView,
+            onChanged: (v) => setState(() => settings.callScreenView = v!),
+            child: Text(v.label),
+          ),
+        const Divider(),
+        CheckboxMenuButton(
+          value: settings.callHideSelf,
+          onChanged: (v) => setState(() => settings.callHideSelf = v!),
+          child: const Text('Hide my own video'),
+        ),
+      ],
+      builder: (context, menu, _) => IconButton.filled(
+        tooltip: 'View',
+        icon: Icon(settings.callPeopleView == PeopleView.speaker
+            ? Icons.view_agenda_outlined
+            : Icons.grid_view),
+        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+      ),
+    );
+  }
+
   Widget _layout(BuildContext context) => CallLayout(
             others: ScreenStage(
               // Contain: a shared screen loses nothing to cropping.
@@ -1257,20 +1302,33 @@ class _CallPageState extends State<CallPage> {
               ],
               // Cover crops to fill, whatever shape the other camera sends.
               people: [
-                for (final r in _call.remotes)
-                  RTCVideoView(
-                    r,
-                    key: ObjectKey(r),
+                for (final p in _call.people)
+                  StageTile(
+                    id: p.session,
+                    name: p.name,
+                    speaking: p.speaking,
+                    video: RTCVideoView(
+                      p.renderer,
+                      key: ObjectKey(p.renderer),
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
+                  ),
+              ],
+              peopleView: widget.settings.callPeopleView,
+              screenView: widget.settings.callScreenView,
+              speaker: _call.activeSpeaker,
+              pinned: _pinned,
+              onPin: (id) => setState(() => _pinned = id),
+            ),
+            self: widget.settings.callHideSelf
+                ? null
+                : RTCVideoView(
+                    _call.localRenderer,
+                    mirror: true,
                     objectFit:
                         RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                   ),
-              ],
-            ),
-            self: RTCVideoView(
-              _call.localRenderer,
-              mirror: true,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-            ),
             chat: widget.settings.callChatOpen
                 ? ConversationPane(
                     key: _chatKey,
@@ -1286,8 +1344,9 @@ class _CallPageState extends State<CallPage> {
                     onCall: () {},
                   )
                 : null,
-            controls: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Shrinks rather than overflows in a narrow window.
+            controls: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton.filled(
                     tooltip: _call.micOn ? 'Mute' : 'Unmute',
@@ -1329,6 +1388,8 @@ class _CallPageState extends State<CallPage> {
                         : Icons.screen_share),
                     onPressed: _call.choosingScreen ? null : _toggleScreen),
                 const SizedBox(width: 12),
+                _viewMenu(),
+                const SizedBox(width: 12),
                 ValueListenableBuilder(
                   valueListenable: widget.unread,
                   builder: (context, unread, _) {
@@ -1356,6 +1417,6 @@ class _CallPageState extends State<CallPage> {
                     icon: const Icon(Icons.call_end),
                     onPressed: () => Navigator.of(context).pop()),
               ],
-            ),
+            ))),
           );
 }

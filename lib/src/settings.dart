@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 import 'backgrounds.dart';
+import 'call_layout.dart';
 import 'log.dart';
 import 'paths.dart';
 
@@ -28,6 +29,9 @@ class AppSettings extends ChangeNotifier {
   bool _callTouchUpOn = false;
   double _callTouchUp = defaultTouchUp;
   bool _callNoiseCancel = false;
+  PeopleView _callPeopleView = PeopleView.grid;
+  ScreenView _callScreenView = ScreenView.below;
+  bool _callHideSelf = false;
 
   /// Where the touch up slider starts.
   static const defaultTouchUp = 0.5;
@@ -75,6 +79,20 @@ class AppSettings extends ChangeNotifier {
   bool get callNoiseCancel => _callNoiseCancel;
   set callNoiseCancel(bool value) => _change(() => _callNoiseCancel = value);
 
+  /// How calls show people: speaker or grid.
+  PeopleView get callPeopleView => _callPeopleView;
+  set callPeopleView(PeopleView value) =>
+      _change(() => _callPeopleView = value);
+
+  /// How calls show a shared screen and the people beside it.
+  ScreenView get callScreenView => _callScreenView;
+  set callScreenView(ScreenView value) =>
+      _change(() => _callScreenView = value);
+
+  /// Whether calls leave out the user's own camera, so they look at others.
+  bool get callHideSelf => _callHideSelf;
+  set callHideSelf(bool value) => _change(() => _callHideSelf = value);
+
   void _change(VoidCallback apply) {
     apply();
     notifyListeners();
@@ -101,6 +119,9 @@ class AppSettings extends ChangeNotifier {
       final touchUp = d['callTouchUp'];
       if (touchUp is num) _callTouchUp = touchUp.toDouble().clamp(0.0, 1.0);
       _callNoiseCancel = d['callNoiseCancel'] == true;
+      _callPeopleView = PeopleView.fromName(d['callPeopleView'] as String?);
+      _callScreenView = ScreenView.fromName(d['callScreenView'] as String?);
+      _callHideSelf = d['callHideSelf'] == true;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
@@ -129,6 +150,9 @@ class AppSettings extends ChangeNotifier {
         'callTouchUpOn': _callTouchUpOn,
         'callTouchUp': _callTouchUp,
         'callNoiseCancel': _callNoiseCancel,
+        'callPeopleView': _callPeopleView.name,
+        'callScreenView': _callScreenView.name,
+        'callHideSelf': _callHideSelf,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

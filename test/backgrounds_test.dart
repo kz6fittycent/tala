@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/src/background_picker.dart';
 import 'package:tala/src/backgrounds.dart';
+import 'package:tala/src/call_layout.dart';
 import 'package:tala/src/settings.dart';
 
 /// A small PNG drawn on the spot.
@@ -120,6 +121,23 @@ void main() {
     expect(again.callTouchUpAmount, 0.8);
     file.writeAsStringSync('{"callTouchUp": 7, "callTouchUpOn": true}');
     expect(AppSettings(file: file).callTouchUpAmount, 1);
+  });
+
+  test('call views are kept, and start as grid with own video shown', () {
+    final dir = Directory.systemTemp.createTempSync('tala-bg');
+    final file = File('${dir.path}/settings.json');
+    final fresh = AppSettings(file: file);
+    expect(fresh.callPeopleView, PeopleView.grid);
+    expect(fresh.callScreenView, ScreenView.below);
+    expect(fresh.callHideSelf, isFalse);
+    fresh
+      ..callPeopleView = PeopleView.speaker
+      ..callScreenView = ScreenView.beside
+      ..callHideSelf = true;
+    final again = AppSettings(file: file);
+    expect(again.callPeopleView, PeopleView.speaker);
+    expect(again.callScreenView, ScreenView.beside);
+    expect(again.callHideSelf, isTrue);
   });
 
   group('picker', () {

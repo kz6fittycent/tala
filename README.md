@@ -23,7 +23,9 @@ The people and conversations in these pictures are made up.
 - Chat with replies, reactions, @ mentions, avatars, Markdown, polls, read
   ticks, typing indicators, message search, editing, deleting, file uploads (by
   button or drag and drop, with progress) and image previews
-- Audio and video calls, with ringing for incoming calls, screen sharing, a
+- Audio and video calls, with ringing for incoming calls, speaker and grid
+  views (pin someone, hide your own video, choose where people go while a
+  screen is shared), names on everyone's video, screen sharing, a
   blurred background or a picture behind you (one of Tala's or your own),
   touch up for your appearance, and noise cancellation that takes keyboards,
   fans and other background noise out of your microphone

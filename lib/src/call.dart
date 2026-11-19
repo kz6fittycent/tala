@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'backgrounds.dart';
+import 'chat.dart' show ApiException;
 import 'internal_signaling.dart';
 import 'log.dart';
 import 'ringer.dart';
@@ -47,6 +48,70 @@ MeshRole meshRole({
   if (!selfHasStreams) return MeshRole.none;
   if (!theyHaveStreams || theirs.compareTo(mine) < 0) return MeshRole.offer;
   return MeshRole.wait;
+}
+
+/// Someone else in the call, as the call screen shows them.
+class CallPerson {
+  const CallPerson(
+    this.session,
+    this.renderer, {
+    this.name,
+    this.speaking = false,
+  });
+
+  /// Their signaling session: stable while they're in the call.
+  final String session;
+  final RTCVideoRenderer renderer;
+
+  /// Their display name, once known.
+  final String? name;
+
+  /// Heard in the last moment.
+  final bool speaking;
+}
+
+/// How loud (root mean square, 0 to 1) audio must be to count as speaking:
+/// speech is about 0.05 to 0.3, a quiet room well under 0.01.
+const speakingLevel = 0.02;
+
+/// Speaking lasts this long after the last loud moment, so pauses between
+/// words don't flicker.
+const speakingHold = Duration(milliseconds: 800);
+
+/// The person in focus changes only after they've been quiet this long.
+const speakerHold = Duration(milliseconds: 1500);
+
+/// Who speaks now, given when each was last loud and how loud: everyone heard
+/// within [speakingHold].
+@visibleForTesting
+Set<String> speakingNow(Map<String, DateTime> loudAt, DateTime now) => {
+  for (final e in loudAt.entries)
+    if (now.difference(e.value) < speakingHold) e.key,
+};
+
+/// The person to focus on: [current] while they're still in the call and
+/// spoke within [speakerHold], otherwise the loudest of those speaking, or
+/// [current] if nobody is (null if they've gone).
+@visibleForTesting
+String? pickSpeaker({
+  required String? current,
+  required Set<String> present,
+  required Set<String> speaking,
+  required Map<String, DateTime> loudAt,
+  required Map<String, double> levels,
+  required DateTime now,
+}) {
+  final here = current != null && present.contains(current);
+  final last = here ? loudAt[current] : null;
+  if (here && last != null && now.difference(last) < speakerHold) {
+    return current;
+  }
+  String? best;
+  for (final s in speaking) {
+    if (!present.contains(s)) continue;
+    if (best == null || (levels[s] ?? 0) > (levels[best] ?? 0)) best = s;
+  }
+  return best ?? (here ? current : null);
 }
 
 class _Peer {
@@ -220,10 +285,139 @@ class Call extends ChangeNotifier {
   /// What the user is sharing, as it leaves here, so a presenter isn't blind.
   RTCVideoRenderer? ownScreen;
 
-  List<RTCVideoRenderer> get remotes => [
-    for (final p in _subs.values)
-      if (p.renderer != null) p.renderer!,
+  /// Everyone else whose video or audio has arrived, in joining order.
+  List<CallPerson> get people => [
+    for (final e in _subs.entries)
+      if (e.value.renderer != null)
+        CallPerson(
+          e.key,
+          e.value.renderer!,
+          name: nameOf(e.key),
+          speaking: _speaking.contains(e.key),
+        ),
   ];
+
+  /// Who's been speaking, kept a moment after they stop ([speakerHold]);
+  /// null until anyone has.
+  String? get activeSpeaker => _speaker;
+
+  /// The name of the person on [session], once known.
+  String? nameOf(String session) =>
+      _names[session] ?? _namesByRoomSession[_roomSessions[session] ?? session];
+
+  /// Names by signaling session, from the media server's join events.
+  final Map<String, String> _names = {};
+
+  /// Nextcloud session by signaling session (the same without a media
+  /// server), and names by Nextcloud session from the participant list.
+  final Map<String, String> _roomSessions = {};
+  final Map<String, String> _namesByRoomSession = {};
+  DateTime? _namesFetched;
+
+  /// Asks the participant list for names, at most every 15 seconds.
+  void _lookUpNames() {
+    final last = _namesFetched;
+    if (last != null && DateTime.now().difference(last).inSeconds < 15) return;
+    _namesFetched = DateTime.now();
+    api.members(room.token).then((members) {
+      for (final m in members) {
+        for (final s in m.sessionIds) {
+          _namesByRoomSession[s] = m.displayName;
+        }
+      }
+      if (!_ended) notifyListeners();
+    }, onError: (Object e) {
+      log('call: members failed: ${e is ApiException ? e.status : e}');
+    });
+  }
+
+  // Speaking, from WebRTC's audio statistics every [_levelEvery].
+  static const _levelEvery = Duration(milliseconds: 300);
+  Timer? _levelTimer;
+  bool _measuring = false;
+  final Map<String, (double, double)> _audioTotals = {};
+  final Map<String, DateTime> _loudAt = {};
+  final Map<String, double> _levels = {};
+  Set<String> _speaking = {};
+  String? _speaker;
+  DateTime? _selfLoudAt;
+  bool _selfSpeaking = false;
+
+  void _startLevels() {
+    _levelTimer ??= Timer.periodic(_levelEvery, (_) => unawaited(_measure()));
+  }
+
+  Future<void> _measure() async {
+    if (_measuring || _ended) return;
+    _measuring = true;
+    try {
+      final now = DateTime.now();
+      for (final e in _subs.entries.toList()) {
+        final level = await _level(e.key, e.value.pc, 'inbound-rtp');
+        if (level == null) continue;
+        _levels[e.key] = level;
+        if (level > speakingLevel) _loudAt[e.key] = now;
+      }
+      // The user's own mic, from whichever connection carries it.
+      final own = _publisher?.pc ??
+          (_subs.isNotEmpty ? _subs.values.first.pc : null);
+      if (own != null && micOn) {
+        final level = await _level('', own, 'media-source');
+        if (level != null && level > speakingLevel) _selfLoudAt = now;
+      }
+      _loudAt.removeWhere((s, _) => !_subs.containsKey(s));
+      _levels.removeWhere((s, _) => !_subs.containsKey(s));
+      final speaking = speakingNow(_loudAt, now);
+      final speaker = pickSpeaker(
+        current: _speaker,
+        present: _subs.keys.toSet(),
+        speaking: speaking,
+        loudAt: _loudAt,
+        levels: _levels,
+        now: now,
+      );
+      final self = micOn &&
+          _selfLoudAt != null &&
+          now.difference(_selfLoudAt!) < speakingHold;
+      if (self != _selfSpeaking) {
+        _selfSpeaking = self;
+        // As the web client does, so it can show the user speaking.
+        _sendToAll(self ? 'speaking' : 'stoppedSpeaking');
+      }
+      if (!setEquals(speaking, _speaking) || speaker != _speaker) {
+        _speaking = speaking;
+        _speaker = speaker;
+        if (!_ended) notifyListeners();
+      }
+    } catch (e) {
+      log('call: audio levels failed: $e');
+    } finally {
+      _measuring = false;
+    }
+  }
+
+  /// The loudness of [type]'s audio since the last look, 0 to 1, or null if
+  /// there's none yet. From total energy over time where the statistics have
+  /// it, so a word between looks isn't missed.
+  Future<double?> _level(String key, RTCPeerConnection pc, String type) async {
+    final reports = await pc.getStats();
+    for (final r in reports) {
+      if (r.type != type || r.values['kind'] != 'audio') continue;
+      final energy = r.values['totalAudioEnergy'];
+      final duration = r.values['totalSamplesDuration'];
+      if (energy is num && duration is num) {
+        final before = _audioTotals['$type $key'];
+        _audioTotals['$type $key'] = (energy.toDouble(), duration.toDouble());
+        if (before == null) return null;
+        final time = duration - before.$2;
+        if (time <= 0) return 0;
+        return sqrt(max(0, energy - before.$1) / time);
+      }
+      final level = r.values['audioLevel'];
+      if (level is num) return level.toDouble();
+    }
+    return null;
+  }
 
   List<RTCVideoRenderer> get screens => [
     for (final p in _screens.values)
@@ -242,6 +436,7 @@ class Call extends ChangeNotifier {
 
   Future<void> start() async {
     current = this;
+    _startLevels();
     Future<MediaStream?>? media;
     try {
       log(
@@ -434,19 +629,23 @@ class Call extends ChangeNotifier {
     log('publisher: offer sent');
   }
 
-  void _sendStatus() {
-    void send(String type) {
-      final message = RTCDataChannelMessage(jsonEncode({'type': type}));
-      _status?.send(message);
-      for (final p in _subs.values) {
-        if (p.status?.state == RTCDataChannelState.RTCDataChannelOpen) {
-          p.status!.send(message);
-        }
+  /// Tells everyone's client something about the user over the status
+  /// channels: audioOn, videoOff, speaking and so on.
+  void _sendToAll(String type) {
+    final message = RTCDataChannelMessage(jsonEncode({'type': type}));
+    if (_status?.state == RTCDataChannelState.RTCDataChannelOpen) {
+      _status!.send(message);
+    }
+    for (final p in _subs.values) {
+      if (p.status?.state == RTCDataChannelState.RTCDataChannelOpen) {
+        p.status!.send(message);
       }
     }
+  }
 
-    send(micOn ? 'audioOn' : 'audioOff');
-    send(camOn ? 'videoOn' : 'videoOff');
+  void _sendStatus() {
+    _sendToAll(micOn ? 'audioOn' : 'audioOff');
+    _sendToAll(camOn ? 'videoOn' : 'videoOff');
   }
 
   void _onEvent(Map<String, dynamic> e) {
@@ -484,6 +683,23 @@ class Call extends ChangeNotifier {
           _requestOffer(session);
         }
       }
+    } else if (target == 'room' && e['type'] == 'join') {
+      // The media server names everyone in the room as they join.
+      var named = false;
+      for (final j in (e['join'] as List? ?? const [])) {
+        if (j is! Map) continue;
+        final sid = j['sessionid'];
+        if (sid is! String) continue;
+        final roomSession = j['roomsessionid'];
+        if (roomSession is String) _roomSessions[sid] = roomSession;
+        final user = j['user'];
+        final name = user is Map ? user['displayname'] : null;
+        if (name is String && name.isNotEmpty) {
+          _names[sid] = name;
+          named = true;
+        }
+      }
+      if (named) notifyListeners();
     } else if (target == 'room' && e['type'] == 'leave') {
       for (final s in (e['leave'] as List? ?? const [])) {
         _leftCall(s as String);
@@ -668,6 +884,7 @@ class Call extends ChangeNotifier {
         p.renderer = r;
       }
       p.renderer!.srcObject = ev.streams.first;
+      if (nameOf(p.session) == null) _lookUpNames();
       _state('In call with ${_subs.length} other(s)');
     };
   }
@@ -1074,6 +1291,10 @@ class Call extends ChangeNotifier {
     for (final t in _local?.getAudioTracks() ?? <MediaStreamTrack>[]) {
       t.enabled = micOn;
     }
+    if (!micOn && _selfSpeaking) {
+      _selfSpeaking = false;
+      _sendToAll('stoppedSpeaking');
+    }
     _sendStatus();
     notifyListeners();
   }
@@ -1261,6 +1482,7 @@ class Call extends ChangeNotifier {
   Future<void> hangUp() async {
     if (_ended) return;
     _ended = true;
+    _levelTimer?.cancel();
     _ringback.stop();
     if (identical(current, this)) current = null;
     for (final t in _offerRetry.values) {

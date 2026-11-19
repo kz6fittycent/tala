@@ -137,7 +137,10 @@ void main() {
             ],
             people: [
               for (var i = 0; i < people; i++)
-                SizedBox(key: ValueKey('person $i')),
+                StageTile(
+                  id: 'p$i',
+                  video: SizedBox(key: ValueKey('person $i')),
+                ),
             ],
           ),
         ),
@@ -192,6 +195,189 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Stop sharing'));
       expect(stopped, 1);
+    });
+  });
+
+  group('views', () {
+    List<StageTile> tiles(int n, {String? speaking}) => [
+      for (var i = 0; i < n; i++)
+        StageTile(
+          id: 'p$i',
+          name: 'Person $i',
+          speaking: 'p$i' == speaking,
+          video: SizedBox.expand(key: ValueKey('video $i')),
+        ),
+    ];
+
+    Future<void> show(
+      WidgetTester tester,
+      Widget child, {
+      Size size = const Size(1000, 700),
+    }) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
+    }
+
+    Rect video(WidgetTester tester, int i) =>
+        tester.getRect(find.byKey(ValueKey('video $i')));
+
+    test('focus goes to the pinned, then the speaker, then the first', () {
+      final people = tiles(3);
+      expect(focusOf(people, pinned: 'p2', speaker: 'p1'), 'p2');
+      expect(focusOf(people, pinned: 'gone', speaker: 'p1'), 'p1');
+      expect(focusOf(people, speaker: 'gone'), 'p0');
+      expect(focusOf(const []), isNull);
+    });
+
+    testWidgets('speaker view: the speaker large, the rest in a row', (
+      tester,
+    ) async {
+      await show(
+        tester,
+        PeopleStage(
+          people: tiles(3, speaking: 'p1'),
+          view: PeopleView.speaker,
+          speaker: 'p1',
+        ),
+      );
+      final big = video(tester, 1);
+      expect(big.width, 1000);
+      expect(big.height, 700 - screenStripHeight - screenControlsSpace);
+      for (final i in [0, 2]) {
+        final small = video(tester, i);
+        expect(small.top, greaterThanOrEqualTo(big.bottom));
+        expect(small.width / small.height, closeTo(16 / 9, 0.01));
+      }
+      // The large one isn't framed; it's plain who it is.
+      expect(find.byKey(const ValueKey('speaking')), findsNothing);
+      expect(find.text('Person 1'), findsOneWidget);
+    });
+
+    testWidgets('speaker view with one other person is just them', (
+      tester,
+    ) async {
+      await show(
+        tester,
+        PeopleStage(people: tiles(1), view: PeopleView.speaker),
+      );
+      expect(video(tester, 0).size, const Size(1000, 700));
+    });
+
+    testWidgets('tapping someone in the row pins them, tapping again lets go',
+        (tester) async {
+      String? pinned;
+      await show(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => PeopleStage(
+            people: tiles(3),
+            view: PeopleView.speaker,
+            speaker: 'p0',
+            pinned: pinned,
+            onPin: (id) => setState(() => pinned = id),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('video 2')));
+      await tester.pumpAndSettle();
+      expect(pinned, 'p2');
+      expect(video(tester, 2).width, 1000);
+      expect(find.byIcon(Icons.push_pin), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('video 2')));
+      await tester.pumpAndSettle();
+      expect(pinned, isNull);
+      expect(video(tester, 0).width, 1000);
+    });
+
+    testWidgets('grid view: everyone the same, the speaker framed', (
+      tester,
+    ) async {
+      await show(
+        tester,
+        PeopleStage(people: tiles(4, speaking: 'p3'), view: PeopleView.grid),
+      );
+      expect(video(tester, 0).size, const Size(500, 350));
+      expect(video(tester, 3).size, const Size(500, 350));
+      expect(find.byKey(const ValueKey('speaking')), findsOneWidget);
+    });
+
+    testWidgets('people beside a shared screen', (tester) async {
+      await show(
+        tester,
+        ScreenStage(
+          screens: const [SizedBox.expand(key: ValueKey('screen'))],
+          people: tiles(2),
+          screenView: ScreenView.beside,
+        ),
+      );
+      final screen = tester.getRect(find.byKey(const ValueKey('screen')));
+      expect(screen.width, 1000 - screenColumnWidth);
+      expect(screen.height, 700 - screenControlsSpace);
+      expect(video(tester, 0).left, greaterThanOrEqualTo(screen.right));
+      expect(video(tester, 1).top, greaterThan(video(tester, 0).top));
+    });
+
+    testWidgets('screen only leaves people out', (tester) async {
+      await show(
+        tester,
+        ScreenStage(
+          screens: const [SizedBox.expand(key: ValueKey('screen'))],
+          people: tiles(2),
+          screenView: ScreenView.only,
+        ),
+      );
+      final screen = tester.getRect(find.byKey(const ValueKey('screen')));
+      expect(screen.size, const Size(1000, 700 - screenControlsSpace));
+      expect(find.byKey(const ValueKey('video 0')), findsNothing);
+    });
+
+    testWidgets('views are stored by name, unknown ones fall back', (
+      tester,
+    ) async {
+      expect(PeopleView.fromName('speaker'), PeopleView.speaker);
+      expect(PeopleView.fromName('nonsense'), PeopleView.grid);
+      expect(ScreenView.fromName('only'), ScreenView.only);
+      expect(ScreenView.fromName(null), ScreenView.below);
+    });
+  });
+
+  group('own video hidden', () {
+    final others = GlobalKey();
+    final chat = GlobalKey();
+
+    Future<void> show(WidgetTester tester, Size size, {bool withChat = true})
+        async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CallLayout(
+            others: SizedBox.expand(key: others),
+            self: null,
+            controls: const SizedBox(height: 40),
+            chat: withChat ? SizedBox.expand(key: chat) : null,
+          ),
+        ),
+      );
+    }
+
+    testWidgets('wide: the chat takes the whole column', (tester) async {
+      await show(tester, const Size(1200, 800));
+      expect(tester.getRect(find.byKey(chat)),
+          const Rect.fromLTWH(860, 0, 340, 800));
+    });
+
+    testWidgets('narrow and without chat, nothing floats in the corner', (
+      tester,
+    ) async {
+      await show(tester, const Size(600, 800));
+      expect(tester.takeException(), isNull);
+      await show(tester, const Size(1200, 800), withChat: false);
+      expect(tester.getRect(find.byKey(others)),
+          const Rect.fromLTWH(0, 0, 1200, 800));
     });
   });
 }

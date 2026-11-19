@@ -16,4 +16,64 @@ void main() {
     expect(note(false, true), 'In call (no mic)');
     expect(note(false, false), 'In call (no camera or mic)');
   });
+
+  group('speaking', () {
+    final now = DateTime(2026, 11, 19, 12);
+    DateTime ago(int ms) => now.subtract(Duration(milliseconds: ms));
+
+    test('lasts a moment after the last loud sound', () {
+      expect(speakingNow({'a': ago(100), 'b': ago(2000)}, now), {'a'});
+      expect(speakingNow({}, now), isEmpty);
+    });
+
+    test('the focus stays through a pause, then goes to the loudest', () {
+      String? pick(String? current, Map<String, DateTime> loudAt,
+              Map<String, double> levels) =>
+          pickSpeaker(
+            current: current,
+            present: {'a', 'b', 'c'},
+            speaking: speakingNow(loudAt, now),
+            loudAt: loudAt,
+            levels: levels,
+            now: now,
+          );
+      // a paused briefly while b spoke: a keeps it.
+      expect(pick('a', {'a': ago(1000), 'b': ago(0)}, {'b': 0.2}), 'a');
+      // a has been quiet long enough: the louder of b and c.
+      expect(
+        pick('a', {'a': ago(3000), 'b': ago(0), 'c': ago(0)},
+            {'b': 0.05, 'c': 0.2}),
+        'c',
+      );
+      // Nobody speaks: whoever had it keeps it.
+      expect(pick('a', {'a': ago(5000)}, {}), 'a');
+      // Nobody yet.
+      expect(pick(null, {}, {}), isNull);
+    });
+
+    test('someone who left loses the focus', () {
+      expect(
+        pickSpeaker(
+          current: 'gone',
+          present: {'a'},
+          speaking: {'a'},
+          loudAt: {'gone': now, 'a': now},
+          levels: {'a': 0.1},
+          now: now,
+        ),
+        'a',
+      );
+      expect(
+        pickSpeaker(
+          current: 'gone',
+          present: {'a'},
+          speaking: const {},
+          loudAt: const {},
+          levels: const {},
+          now: now,
+        ),
+        isNull,
+      );
+    });
+  });
 }
