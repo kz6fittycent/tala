@@ -1,10 +1,30 @@
 name: 🧪 Snap Builds
 
+# One run per push: test, build, review, and on main, when pubspec's version
+# is new (tool/bump_version.sh), upload that same .snap to candidate and open
+# a call-for-testing issue. The snap that's released is the one that passed
+# the tests and the review; nothing is built twice.
+# Store publishing is OFF until the repository variable TALA_STORE_PUBLISH is
+# set to true.
+
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: read
+
+# A newer push to a PR replaces its older build. Pushes to main are never
+# cancelled, so an upload can't be cut off halfway; the gate below skips a
+# run that's no longer the tip.
+concurrency:
+  group: snap-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SNAP_NAME: tala
 
 jobs:
   test:
@@ -27,6 +47,8 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      snap: ${{ steps.build.outputs.snap }}
 
     steps:
       - name: Checkout Repository
@@ -45,7 +67,7 @@ jobs:
       # The .snap for installing by hand: `sudo snap install --dangerous <file>`.
       # Download it from the run's Summary page; it's zipped, so unzip first.
       # Before the review, so a build the review flags can still be looked at.
-      # Nothing goes to the store here.
+      # The publish job below uploads this same file to the store.
       - name: Upload Snap
         uses: actions/upload-artifact@v7
         with:
@@ -59,3 +81,177 @@ jobs:
         with:
           snap: ${{ steps.build.outputs.snap }}
           isClassic: 'false'
+
+  # Only a new version is released: a push to main that didn't bump the
+  # version in pubspec.yaml is built and checked but not uploaded.
+  gate:
+    needs: build
+    if: vars.TALA_STORE_PUBLISH == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout pubspec.yaml
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: pubspec.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Is this version already in the store?
+        id: check
+        run: |
+          version="$(grep -m1 -oP '^version: \K[^+\s]+' pubspec.yaml)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # Every version on any channel, e.g. "latest/candidate: 0.1.1 2026-11-06 (2) 14MB -".
+          # A failed lookup fails the job: better no release than a duplicate.
+          # The exception is a name with nothing released yet.
+          if ! info="$(snap info "$SNAP_NAME" 2>&1)"; then
+            grep -q 'no snap found' <<< "$info" || { echo "$info"; exit 1; }
+            info=""
+          fi
+          published="$(awk '$1 ~ /^[a-z0-9.-]+\/[a-z]+:$/ && $2 != "--" && $2 != "^" {print $2}' <<< "$info" | sort -u)"
+          echo "Store versions:"; echo "${published:-(none)}"
+          # Only a version NEWER than everything in the store goes out: an older
+          # commit's build must never replace a newer candidate.
+          newest="$(sed 's/+.*//' <<< "$published" | sort -V | tail -n1)"
+          # And only from the tip of main: a late run for an older push skips.
+          tip="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$tip" != "$GITHUB_SHA" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::This commit is no longer the tip of main (${tip:0:7}); not uploading."
+          elif [[ -n "$newest" && "$(printf '%s\n%s\n' "$newest" "$version" | sort -V | tail -n1)" != "$version" ]] \
+               || [[ "$version" == "$newest" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Version ${version} is not newer than the store's ${newest}; not uploading. Bump it with tool/bump_version.sh to release."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${version} is new; publishing to candidate."
+          fi
+
+  publish-candidate:
+    needs: [build, gate]
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.upload.outputs.revision }}
+    steps:
+      - name: Download the tested snap
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.snap }}
+
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Upload to the candidate channel
+        id: upload
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          SNAP_FILE: ${{ needs.build.outputs.snap }}
+        run: |
+          # Not "latest/candidate": a `snapcraft export-login` macaroon's
+          # channel grant is the bare risk levels (stable/candidate/beta/
+          # edge), not track-qualified, so the store rejects the
+          # track-prefixed form here with invalid-channel-permission even
+          # though it's the same channel as far as snapd itself is
+          # concerned.
+          output="$(snapcraft upload "$SNAP_FILE" --release=candidate)"
+          echo "$output"
+
+          revision="$(grep -Po 'Revision \K[0-9]+' <<< "$output")"
+          if [[ -z "$revision" ]]; then
+            echo "Could not parse a revision number out of 'snapcraft upload' output."
+            exit 1
+          fi
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+
+  open-issue:
+    needs: [gate, publish-candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure the call-for-testing label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "call-for-testing" \
+            --repo "${{ github.repository }}" \
+            --color "FBCA04" \
+            --description "Automated candidate build ready for testing" \
+            2>/dev/null || true
+
+      - name: Create the call for testing issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.gate.outputs.version }}
+          REVISION: ${{ needs.publish-candidate.outputs.revision }}
+        run: |
+          # The "/promote <revision>[,<revision>...] stable [done]" syntax
+          # here is what promote-to-stable.yml parses back out of the
+          # triggering comment (not this issue body) - keep it in sync
+          # with the pattern that workflow matches if this changes.
+          #
+          # Deliberately "stable", not "latest/stable": a `snapcraft
+          # export-login` macaroon's channel grant is the bare risk levels,
+          # and the track-qualified form gets rejected with
+          # invalid-channel-permission.
+          body=$(cat <<EOF
+          A new candidate build of Tala is ready for testing.
+
+          **Version:** ${VERSION}
+          **Revision:** ${REVISION}
+          **Channel:** \`latest/candidate\`
+
+          ## How to test
+
+          1. Install or refresh to this build:
+
+             \`\`\`
+             sudo snap install ${SNAP_NAME} --channel latest/candidate
+             # or, if already installed:
+             sudo snap refresh ${SNAP_NAME} --channel latest/candidate
+             \`\`\`
+
+          2. Connect the interfaces that aren't connected automatically:
+
+             \`\`\`
+             sudo snap connect ${SNAP_NAME}:password-manager-service
+             sudo snap connect ${SNAP_NAME}:camera
+             sudo snap connect ${SNAP_NAME}:audio-record
+             sudo snap connect ${SNAP_NAME}:removable-media
+             \`\`\`
+
+          3. Launch it and try it out.
+
+          ## How to release it
+
+          Once you're satisfied this revision is good, promote it to stable by commenting:
+
+          \`\`\`
+          /promote <revision>[,<revision>...] stable [done]
+          \`\`\`
+
+          - \`<revision>\` - the revision number(s) to release (comma-separated for more than one)
+          - \`stable\` - required as shown; this command only ever promotes to \`stable\`
+          - \`done\` (optional) - also closes this issue once released; leave it off to release and keep the issue open for further testing
+
+          For this revision, that's:
+
+          \`\`\`
+          /promote ${REVISION} stable done
+          \`\`\`
+
+          The comment is the approval: \`promote-to-stable.yml\` then runs \`snapcraft release\` straight away.
+
+          ---
+          _Opened automatically after a successful build on \`main\`._
+          EOF
+          )
+
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Call for testing: v${VERSION} (revision ${REVISION})" \
+            --label "call-for-testing" \
+            --body "$body"
