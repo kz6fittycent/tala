@@ -1,17 +1,32 @@
 // Runs Tala's background blur on one raw I420 frame for check_blur.py:
 //   check_blur_main <width> <height> <in.yuv> <out.yuv> [runs
 //                   [<picture.rgba> <picture width> <picture height>]]
-// With a picture, it goes behind the person instead of the blur. Prints the
-// average time per frame.
+//                   [--touch-up=<0 to 1>] [--no-blur]
+// With a picture, it goes behind the person instead of the blur; --no-blur
+// leaves the background alone. Prints the average time per frame.
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "background_blur.h"
 
 int main(int argc, char** argv) {
+  float touch_up = 0;
+  bool blur_background = true;
+  int kept = 1;
+  for (int i = 1; i < argc; i++) {
+    if (std::strncmp(argv[i], "--touch-up=", 11) == 0) {
+      touch_up = std::atof(argv[i] + 11);
+    } else if (std::strcmp(argv[i], "--no-blur") == 0) {
+      blur_background = false;
+    } else {
+      argv[kept++] = argv[i];
+    }
+  }
+  argc = kept;
   if (argc < 5) return 2;
   const int w = std::atoi(argv[1]), h = std::atoi(argv[2]);
   const int cw = (w + 1) / 2, ch = (h + 1) / 2;
@@ -30,6 +45,7 @@ int main(int argc, char** argv) {
   frame.stride_u = frame.stride_v = cw;
   const int runs = argc > 5 ? std::atoi(argv[5]) : 1;
   tala::BackgroundBlur blur;
+  blur.SetLook(blur_background, touch_up);
   if (argc > 8) {
     const int pw = std::atoi(argv[7]), ph = std::atoi(argv[8]);
     std::vector<uint8_t> rgba(static_cast<size_t>(pw) * ph * 4);

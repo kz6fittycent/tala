@@ -1144,11 +1144,28 @@ class _CallPageState extends State<CallPage> {
     widget.room,
     answering: widget.answering,
     background: widget.settings.callBackground,
+    touchUp: widget.settings.callTouchUpAmount,
+    noiseCancel: widget.settings.callNoiseCancel,
   )..start();
 
   Future<void> _chooseBackground() async {
     final messenger = ScaffoldMessenger.of(context);
-    final wanted = await showBackgroundPicker(context, _call.background);
+    final settings = widget.settings;
+    final wanted = await showBackgroundPicker(
+      context,
+      _call.background,
+      touchUpOn: settings.callTouchUpOn,
+      touchUp: settings.callTouchUp,
+      onTouchUp: (on, amount) async {
+        final ok = await _call.setTouchUp(on ? amount : 0);
+        // Remembered for the next call only when it took.
+        if (ok) {
+          settings.callTouchUpOn = on;
+          settings.callTouchUp = amount;
+        }
+        return ok;
+      },
+    );
     if (wanted == null || !mounted) return;
     final ok = await _call.setBackground(wanted);
     // Remembered for the next call only when it took.
@@ -1161,6 +1178,18 @@ class _CallPageState extends State<CallPage> {
               : 'Couldn\'t show that background.'),
         ),
       );
+    }
+  }
+
+  Future<void> _toggleNoiseCancel() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final wanted = !_call.noiseCancel;
+    final ok = await _call.setNoiseCancel(wanted);
+    if (ok) widget.settings.callNoiseCancel = wanted;
+    if (!ok && mounted) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Couldn\'t turn on noise cancellation.'),
+      ));
     }
   }
 
@@ -1266,6 +1295,15 @@ class _CallPageState extends State<CallPage> {
                     onPressed: _call.toggleMic),
                 const SizedBox(width: 12),
                 IconButton.filled(
+                    tooltip: _call.noiseCancel
+                        ? 'Noise cancellation is on'
+                        : 'Noise cancellation is off',
+                    isSelected: _call.noiseCancel,
+                    icon: const Icon(Icons.noise_control_off),
+                    selectedIcon: const Icon(Icons.noise_aware),
+                    onPressed: _toggleNoiseCancel),
+                const SizedBox(width: 12),
+                IconButton.filled(
                     tooltip:
                         _call.camOn ? 'Turn camera off' : 'Turn camera on',
                     icon: Icon(
@@ -1273,8 +1311,9 @@ class _CallPageState extends State<CallPage> {
                     onPressed: _call.toggleCam),
                 const SizedBox(width: 12),
                 IconButton.filled(
-                    tooltip: 'Background',
-                    isSelected: _call.background != CallBackground.none,
+                    tooltip: 'Background and touch up',
+                    isSelected: _call.background != CallBackground.none ||
+                        _call.touchUp > 0,
                     icon: const Icon(Icons.wallpaper_outlined),
                     selectedIcon: const Icon(Icons.wallpaper),
                     onPressed: _call.camOn ? _chooseBackground : null),

@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "blur_processor.h"
+#include "noise_processor.h"
 #endif
 
 namespace flutter_webrtc_plugin {
@@ -55,11 +56,17 @@ class FlutterWebRTC : public FlutterWebRTCBase,
 
 #ifdef __linux__
   // Tala: blurs the background of a local camera track, or stops. Returns
-  // whether the track is now blurred. Platform thread.
-  // With a picture (RGBA, rows packed), it goes behind the person instead.
+  // whether the track now has the processor. Platform thread.
+  // With a picture (RGBA, rows packed), it goes behind the person instead;
+  // without one, `blur` false leaves the background alone. `touch_up` (0 to
+  // 1) smooths the person's skin.
   bool SetBackgroundBlur(const std::string& track_id, bool enabled,
                          std::vector<uint8_t> picture = {}, int width = 0,
-                         int height = 0);
+                         int height = 0, bool blur = true, float touch_up = 0);
+
+  // Tala: noise cancellation on every microphone, through libwebrtc's audio
+  // processing. Never freed (see noise_processor.h). Platform thread.
+  tala::NoiseProcessor* noise_ = nullptr;
 
   // Blur processors by track id. A disposed track's processor is already
   // detached by FlutterWebRTCBase, so stale entries are only freed here.

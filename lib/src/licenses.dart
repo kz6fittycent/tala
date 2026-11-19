@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 
 /// What `flutter build` doesn't collect for the license page: Tala's own
 /// license, the libraries inside the prebuilt libwebrtc.so, which isn't a
-/// Dart package (`tool/make_webrtc_licenses.py` writes that file), and the
-/// model behind background blur.
+/// Dart package (`tool/make_webrtc_licenses.py` writes that file), the model
+/// behind background blur and RNNoise, behind noise cancellation.
 void registerLicenses() {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(
@@ -20,6 +20,10 @@ void registerLicenses() {
     yield LicenseEntryWithLineBreaks(
       const ['MediaPipe Selfie Segmentation'],
       await rootBundle.loadString('assets/licenses/mediapipe_selfie.txt'),
+    );
+    yield LicenseEntryWithLineBreaks(
+      const ['RNNoise'],
+      await rootBundle.loadString('assets/licenses/rnnoise.txt'),
     );
   });
 }

@@ -35,6 +35,21 @@ constexpr int kBlurPasses = 3;
 // shows as a halo against a different picture. Blurring hides it.
 constexpr float kPictureCut = 0.3f;
 
+// Touch up: each pixel of skin is pulled toward an edge-preserving smoothed
+// copy of the picture (a guided filter at the guide's size), but only as far
+// as it differs from it by a little: pores, blemishes and shine go, while
+// eyes, brows, lips and the edges of hair and glasses differ by more and stay.
+constexpr int kTouchRadius = 3;  // in guide pixels
+constexpr float kTouchEps = 0.003f;
+// Detail this strong, in Y levels, is half kept; much stronger is all kept.
+constexpr float kTouchDetail = 10.0f;
+// Skin's color, BT.601 limited range: the usual box of Cb 77 to 127 and Cr
+// 133 to 173, which holds across skin tones, eased in over this many levels.
+constexpr float kSkinSoft = 8.0f;
+// The most of that pull the slider's top end gives: much more looks waxy,
+// with the strongest specks left standing out.
+constexpr float kTouchMost = 0.7f;
+
 uint8_t Clamp8(float v) {
   return static_cast<uint8_t>(std::min(std::max(v + 0.5f, 0.0f), 255.0f));
 }
@@ -218,6 +233,12 @@ void CropAxis(int to, float start, float length, int from, std::vector<int>& lo,
   }
 }
 
+// 1 inside lo..hi, falling to 0 kSkinSoft outside it.
+float Ramp(float v, float lo, float hi) {
+  const float d = std::max(lo - v, v - hi);
+  return d <= 0 ? 1.0f : d >= kSkinSoft ? 0.0f : 1 - d / kSkinSoft;
+}
+
 }  // namespace
 
 void BackgroundBlur::SetPicture(const std::vector<uint8_t>& rgba, int width,
@@ -304,6 +325,41 @@ void BackgroundBlur::Segment(const I420& in) {
   mask_height_ = in.height;
 }
 
+void BackgroundBlur::TouchUp(const I420& in, int gw, int gh) {
+  smooth_ = guide_;
+  GuidedFilter(guide_, smooth_, gw, gh, kTouchRadius, kTouchEps, scratch_);
+  const int w = in.width, h = in.height;
+  touched_.resize(static_cast<size_t>(w) * h);
+  std::vector<int> xs, ys;
+  std::vector<float> fx, fy;
+  Axis(w, gw, xs, fx);
+  Axis(h, gh, ys, fy);
+  std::vector<float> srow(gw), mrow(gw);
+  const float inv = 1 / (kTouchDetail * kTouchDetail);
+  for (int y = 0; y < h; y++) {
+    VerticalLerp(smooth_.data(), gw, gh, ys[y], fy[y], srow.data());
+    VerticalLerp(refined_.data(), gw, gh, ys[y], fy[y], mrow.data());
+    const uint8_t* row = in.y + static_cast<size_t>(y) * in.stride_y;
+    const uint8_t* u = in.u + static_cast<size_t>(y / 2) * in.stride_u;
+    const uint8_t* v = in.v + static_cast<size_t>(y / 2) * in.stride_v;
+    uint8_t* o = &touched_[static_cast<size_t>(y) * w];
+    for (int x = 0; x < w; x++) {
+      const int a = xs[x], b = std::min(a + 1, gw - 1);
+      const float person = mrow[a] + (mrow[b] - mrow[a]) * fx[x];
+      const float skin = Ramp(u[x / 2], 77, 127) * Ramp(v[x / 2], 133, 173);
+      const float weight = kTouchMost * touch_up_ * person * skin;
+      if (weight < 0.01f) {
+        o[x] = row[x];
+        continue;
+      }
+      const float base = 255 * (srow[a] + (srow[b] - srow[a]) * fx[x]);
+      const float d = row[x] - base;
+      const float t = d * d * inv;
+      o[x] = Clamp8(row[x] - weight * d / (1 + t * t));
+    }
+  }
+}
+
 void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
                            uint8_t* out_v) {
   Segment(in);
@@ -321,13 +377,35 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
   for (float& v : refined_) v = v * v * (3 - 2 * v);
 
   const int cw = (in.width + 1) / 2, ch = (in.height + 1) / 2;
+  // Touched up, the person's brightness comes from touched_ from here on.
+  const uint8_t* luma = in.y;
+  int luma_stride = in.stride_y;
+  if (touch_up_ > 0) {
+    TouchUp(in, gw, gh);
+    luma = touched_.data();
+    luma_stride = in.width;
+  }
+  if (picture_width_ == 0 && !blur_) {
+    const uint8_t* planes[3] = {luma, in.u, in.v};
+    const int strides[3] = {luma_stride, in.stride_u, in.stride_v};
+    uint8_t* outs[3] = {out_y, out_u, out_v};
+    for (int i = 0; i < 3; i++) {
+      const int w = i == 0 ? in.width : cw, h = i == 0 ? in.height : ch;
+      for (int y = 0; y < h; y++) {
+        std::copy(planes[i] + static_cast<size_t>(y) * strides[i],
+                  planes[i] + static_cast<size_t>(y) * strides[i] + w,
+                  outs[i] + static_cast<size_t>(y) * w);
+      }
+    }
+    return;
+  }
   if (picture_width_ > 0) {
     for (float& v : refined_) {
       v = std::max(0.0f, (v - kPictureCut) / (1 - kPictureCut));
     }
     FitPicture(in.width, in.height);
-    const uint8_t* planes[3] = {in.y, in.u, in.v};
-    const int strides[3] = {in.stride_y, in.stride_u, in.stride_v};
+    const uint8_t* planes[3] = {luma, in.u, in.v};
+    const int strides[3] = {luma_stride, in.stride_u, in.stride_v};
     uint8_t* outs[3] = {out_y, out_u, out_v};
     for (int i = 0; i < 3; i++) {
       const int w = i == 0 ? in.width : cw, h = i == 0 ? in.height : ch;
@@ -338,8 +416,8 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
   }
 
   const int factor = std::max(1, in.width / kSmallWidth);
-  const uint8_t* planes[3] = {in.y, in.u, in.v};
-  const int strides[3] = {in.stride_y, in.stride_u, in.stride_v};
+  const uint8_t* planes[3] = {luma, in.u, in.v};
+  const int strides[3] = {luma_stride, in.stride_u, in.stride_v};
   const int widths[3] = {in.width, cw, cw};
   const int heights[3] = {in.height, ch, ch};
   uint8_t* outs[3] = {out_y, out_u, out_v};

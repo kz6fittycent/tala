@@ -25,6 +25,17 @@ void main() {
         .readAsStringSync(), contains('Apache License 2.0'));
   });
 
+  test('RNNoise\'s license ships and is declared', () {
+    final text = File('assets/licenses/rnnoise.txt').readAsStringSync();
+    expect(text, contains('RNNoise'));
+    expect(text, contains('Redistribution and use in source and binary forms'));
+    final copying = File('third_party/flutter_webrtc/third_party/rnnoise/COPYING')
+        .readAsStringSync();
+    expect(text, contains(copying.trim()));
+    expect(File('pubspec.yaml').readAsStringSync(),
+        contains('assets/licenses/rnnoise.txt'));
+  });
+
   test('the shipped file covers what libwebrtc.so compiles in', () {
     final parsed = parseBundledLicenses(
       File('assets/licenses/libwebrtc.txt').readAsStringSync(),
@@ -61,6 +72,7 @@ void main() {
     registerLicenses();
     final entries = await LicenseRegistry.licenses.toList();
     final packages = entries.expand((e) => e.packages).toSet();
-    expect(packages, containsAll(const ['Tala', 'WebRTC', 'FFmpeg']));
+    expect(packages,
+        containsAll(const ['Tala', 'WebRTC', 'FFmpeg', 'RNNoise']));
   });
 }

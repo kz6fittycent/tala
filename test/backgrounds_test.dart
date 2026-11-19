@@ -99,12 +99,37 @@ void main() {
     expect(AppSettings(file: file).callBackground.id, 'hills');
   });
 
+  test('touch up and noise cancellation are kept, and start off', () {
+    final dir = Directory.systemTemp.createTempSync('tala-bg');
+    final file = File('${dir.path}/settings.json');
+    final fresh = AppSettings(file: file);
+    expect(fresh.callTouchUpOn, isFalse);
+    expect(fresh.callTouchUp, AppSettings.defaultTouchUp);
+    expect(fresh.callTouchUpAmount, 0);
+    expect(fresh.callNoiseCancel, isFalse);
+    fresh
+      ..callTouchUp = 0.8
+      ..callNoiseCancel = true;
+    // Off, the amount is kept but a call gets none.
+    var again = AppSettings(file: file);
+    expect(again.callTouchUp, 0.8);
+    expect(again.callTouchUpAmount, 0);
+    expect(again.callNoiseCancel, isTrue);
+    again.callTouchUpOn = true;
+    again = AppSettings(file: file);
+    expect(again.callTouchUpAmount, 0.8);
+    file.writeAsStringSync('{"callTouchUp": 7, "callTouchUpOn": true}');
+    expect(AppSettings(file: file).callTouchUpAmount, 1);
+  });
+
   group('picker', () {
     Future<Future<CallBackground?>> show(
       WidgetTester tester,
       Directory dir, {
       CallBackground current = CallBackground.none,
       Future<Uint8List?> Function()? choose,
+      bool touchUpOn = false,
+      TouchUpChange? onTouchUp,
     }) async {
       late Future<CallBackground?> result;
       await tester.pumpWidget(MaterialApp(
@@ -115,6 +140,8 @@ void main() {
               current,
               dir: dir,
               choosePicture: choose ?? () async => null,
+              touchUpOn: touchUpOn,
+              onTouchUp: onTouchUp,
             ),
             child: const Text('open'),
           ),
@@ -172,6 +199,47 @@ void main() {
       await tester.tap(find.text('Your picture'));
       await tester.pumpAndSettle();
       expect(await result, CallBackground.own);
+    });
+
+    testWidgets('touch up is only there when the call can do it',
+        (tester) async {
+      final dir = Directory.systemTemp.createTempSync('tala-bg');
+      await show(tester, dir);
+      expect(find.text('Touch up appearance'), findsNothing);
+    });
+
+    testWidgets('touch up changes at once and keeps the picker open',
+        (tester) async {
+      final dir = Directory.systemTemp.createTempSync('tala-bg');
+      final changes = <(bool, double)>[];
+      await show(tester, dir, onTouchUp: (on, amount) async {
+        changes.add((on, amount));
+        return true;
+      });
+      final slider = find.byType(Slider);
+      expect(tester.widget<Slider>(slider).onChanged, isNull);
+      await tester.tap(find.text('Touch up appearance'));
+      await tester.pumpAndSettle();
+      expect(changes, [(true, 0.5)]);
+      expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+      // A drag is taken up once, on release.
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      await tester.drag(slider, const Offset(400, 0));
+      await tester.pumpAndSettle();
+      expect(changes.length, 2);
+      expect(changes.last, (true, 1.0));
+      expect(find.text('Touch up appearance'), findsOneWidget);
+    });
+
+    testWidgets('touch up that fails goes back and says so', (tester) async {
+      final dir = Directory.systemTemp.createTempSync('tala-bg');
+      await show(tester, dir, onTouchUp: (on, amount) async => false);
+      await tester.tap(find.text('Touch up appearance'));
+      await tester.pumpAndSettle();
+      expect(find.text('Couldn\'t touch up your video.'), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+          isFalse);
     });
   });
 }

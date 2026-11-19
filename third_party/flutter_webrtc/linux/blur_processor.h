@@ -1,6 +1,6 @@
-// Tala: background blur, or a picture behind the person, as a libwebrtc video
-// processor. Attached to a camera track by FlutterWebRTC's setBackgroundBlur
-// method; the work itself is in background_blur.cc.
+// Tala: background blur, or a picture behind the person, and touch up, as a
+// libwebrtc video processor. Attached to a camera track by FlutterWebRTC's
+// setBackgroundBlur method; the work itself is in background_blur.cc.
 
 #ifndef TALA_BLUR_PROCESSOR_H_
 #define TALA_BLUR_PROCESSOR_H_
@@ -18,12 +18,16 @@ namespace tala {
 class BlurProcessor : public libwebrtc::RTCVideoProcessor {
  public:
   // From any thread: the picture to show behind the person from the next
-  // frame on (see BackgroundBlur::SetPicture), or empty to blur.
-  void SetPicture(std::vector<uint8_t> rgba, int width, int height) {
+  // frame on (see BackgroundBlur::SetPicture), or empty for none; whether to
+  // blur when there's none; and how much touch up (see SetLook).
+  void SetEffects(std::vector<uint8_t> rgba, int width, int height, bool blur,
+                  float touch_up) {
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_ = std::move(rgba);
     pending_width_ = width;
     pending_height_ = height;
+    pending_blur_ = blur;
+    pending_touch_up_ = touch_up;
     has_pending_ = true;
   }
 
@@ -38,6 +42,7 @@ class BlurProcessor : public libwebrtc::RTCVideoProcessor {
       std::lock_guard<std::mutex> lock(pending_mutex_);
       if (has_pending_) {
         blur_.SetPicture(pending_, pending_width_, pending_height_);
+        blur_.SetLook(pending_blur_, pending_touch_up_);
         std::vector<uint8_t>().swap(pending_);
         has_pending_ = false;
       }
@@ -65,6 +70,8 @@ class BlurProcessor : public libwebrtc::RTCVideoProcessor {
   std::mutex pending_mutex_;
   std::vector<uint8_t> pending_;
   int pending_width_ = 0, pending_height_ = 0;
+  bool pending_blur_ = true;
+  float pending_touch_up_ = 0;
   bool has_pending_ = false;
 };
 

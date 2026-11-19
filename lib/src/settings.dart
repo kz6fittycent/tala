@@ -25,6 +25,12 @@ class AppSettings extends ChangeNotifier {
   bool _messageSound = true;
   bool _callChatOpen = true;
   CallBackground _callBackground = CallBackground.none;
+  bool _callTouchUpOn = false;
+  double _callTouchUp = defaultTouchUp;
+  bool _callNoiseCancel = false;
+
+  /// Where the touch up slider starts.
+  static const defaultTouchUp = 0.5;
 
   /// Takes the Archived section out of the list altogether.
   bool get hideArchived => _hideArchived;
@@ -53,6 +59,22 @@ class AppSettings extends ChangeNotifier {
   set callBackground(CallBackground value) =>
       _change(() => _callBackground = value);
 
+  /// Whether calls smooth the user's skin, and by how much (0 to 1); the
+  /// amount is kept while it's off.
+  bool get callTouchUpOn => _callTouchUpOn;
+  set callTouchUpOn(bool value) => _change(() => _callTouchUpOn = value);
+
+  double get callTouchUp => _callTouchUp;
+  set callTouchUp(double value) =>
+      _change(() => _callTouchUp = value.clamp(0.0, 1.0));
+
+  /// What a call passes as its touch up: the amount, or 0 while it's off.
+  double get callTouchUpAmount => _callTouchUpOn ? _callTouchUp : 0;
+
+  /// Whether calls take background noise out of the user's microphone.
+  bool get callNoiseCancel => _callNoiseCancel;
+  set callNoiseCancel(bool value) => _change(() => _callNoiseCancel = value);
+
   void _change(VoidCallback apply) {
     apply();
     notifyListeners();
@@ -75,6 +97,10 @@ class AppSettings extends ChangeNotifier {
           : d['blurBackground'] == true
               ? CallBackground.blur
               : CallBackground.none;
+      _callTouchUpOn = d['callTouchUpOn'] == true;
+      final touchUp = d['callTouchUp'];
+      if (touchUp is num) _callTouchUp = touchUp.toDouble().clamp(0.0, 1.0);
+      _callNoiseCancel = d['callNoiseCancel'] == true;
       for (final mode in ThemeMode.values) {
         if (d['theme'] == mode.name) _themeMode = mode;
       }
@@ -100,6 +126,9 @@ class AppSettings extends ChangeNotifier {
         'messageSound': _messageSound,
         'callChatOpen': _callChatOpen,
         'callBackground': _callBackground.id,
+        'callTouchUpOn': _callTouchUpOn,
+        'callTouchUp': _callTouchUp,
+        'callNoiseCancel': _callNoiseCancel,
       }));
       temp.renameSync(_file.path);
     } on FileSystemException catch (e) {

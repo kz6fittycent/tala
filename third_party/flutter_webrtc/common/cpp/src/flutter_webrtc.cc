@@ -31,7 +31,7 @@ FlutterWebRTC::~FlutterWebRTC() {
 bool FlutterWebRTC::SetBackgroundBlur(const std::string& track_id,
                                       bool enabled,
                                       std::vector<uint8_t> picture, int width,
-                                      int height) {
+                                      int height, bool blur, float touch_up) {
   // Free processors whose tracks are gone; their sources already let go.
   for (auto it = blurs_.begin(); it != blurs_.end();) {
     if (!MediaTrackForId(it->first)) {
@@ -50,13 +50,14 @@ bool FlutterWebRTC::SetBackgroundBlur(const std::string& track_id,
     return false;
   }
   if (found != blurs_.end()) {
-    found->second->SetPicture(std::move(picture), width, height);
+    found->second->SetEffects(std::move(picture), width, height, blur,
+                              touch_up);
     return true;
   }
-  auto blur = std::make_unique<tala::BlurProcessor>();
-  blur->SetPicture(std::move(picture), width, height);
-  if (!AddVideoProcessor(track_id, blur.get())) return false;
-  blurs_[track_id] = std::move(blur);
+  auto processor = std::make_unique<tala::BlurProcessor>();
+  processor->SetEffects(std::move(picture), width, height, blur, touch_up);
+  if (!AddVideoProcessor(track_id, processor.get())) return false;
+  blurs_[track_id] = std::move(processor);
   return true;
 }
 #endif
@@ -143,8 +144,41 @@ void FlutterWebRTC::HandleMethodCall(
     std::vector<uint8_t> picture = findVector(params, "picture");
     const int width = findInt(params, "width");
     const int height = findInt(params, "height");
+    // Optional: false leaves the background alone (touch up only), and how
+    // much to touch up, 0 to 1.
+    const auto blur_arg = params.find(EncodableValue("blur"));
+    const bool blur = blur_arg == params.end() || findBoolean(params, "blur");
+    const float touch_up = static_cast<float>(findDouble(params, "touchUp"));
     result->Success(EncodableValue(SetBackgroundBlur(
-        track_id, enabled, std::move(picture), width, height)));
+        track_id, enabled, std::move(picture), width, height, blur,
+        touch_up)));
+  } else if (method_call.method_name().compare("setNoiseCancellation") == 0) {
+    // {enabled}. Returns whether the processor is in libwebrtc's audio
+    // processing; the audio thread takes it up with the next 10 ms.
+    const EncodableMap params =
+        method_call.arguments() ? GetValue<EncodableMap>(*method_call.arguments())
+                                : EncodableMap();
+    const bool enabled = findBoolean(params, "enabled");
+    if (!noise_ && enabled) {
+      if (!audio_processing()) {
+        result->Success(EncodableValue(false));
+        return;
+      }
+      noise_ = new tala::NoiseProcessor();
+      noise_->SetEnabled(true);
+      audio_processing()->SetCapturePostProcessing(noise_);
+    } else if (noise_) {
+      noise_->SetEnabled(enabled);
+    }
+    result->Success(EncodableValue(noise_ != nullptr && enabled));
+  } else if (method_call.method_name().compare("getNoiseCancellation") == 0) {
+    // {enabled, working}: working once the audio thread has cleaned audio.
+    EncodableMap state;
+    state[EncodableValue("enabled")] =
+        EncodableValue(noise_ != nullptr && noise_->enabled());
+    state[EncodableValue("working")] =
+        EncodableValue(noise_ != nullptr && noise_->working());
+    result->Success(EncodableValue(state));
 #endif
   } else if (method_call.method_name().compare("getDesktopSources") == 0) {
     // types: ["screen", "window"]

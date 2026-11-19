@@ -7,13 +7,21 @@ import 'package:flutter/material.dart';
 import 'backgrounds.dart';
 import 'log.dart';
 
+/// Changes touch up at once, while the picker is open: on or off, and how
+/// much. Returns false if it couldn't be done.
+typedef TouchUpChange = Future<bool> Function(bool on, double amount);
+
 /// Lets the user pick what goes behind them in a call. Returns the choice,
-/// or null if they closed it without one.
+/// or null if they closed it without one. With [onTouchUp], it also has
+/// touch up, which takes effect as it's changed.
 Future<CallBackground?> showBackgroundPicker(
   BuildContext context,
   CallBackground current, {
   Directory? dir,
   Future<Uint8List?> Function()? choosePicture,
+  bool touchUpOn = false,
+  double touchUp = 0.5,
+  TouchUpChange? onTouchUp,
 }) {
   return showDialog<CallBackground>(
     context: context,
@@ -21,6 +29,9 @@ Future<CallBackground?> showBackgroundPicker(
       current: current,
       dir: dir,
       choosePicture: choosePicture ?? _pickPictureFile,
+      touchUpOn: touchUpOn,
+      touchUp: touchUp,
+      onTouchUp: onTouchUp,
     ),
   );
 }
@@ -48,11 +59,17 @@ class BackgroundPicker extends StatefulWidget {
     required this.current,
     required this.choosePicture,
     this.dir,
+    this.touchUpOn = false,
+    this.touchUp = 0.5,
+    this.onTouchUp,
   });
 
   final CallBackground current;
   final Future<Uint8List?> Function() choosePicture;
   final Directory? dir;
+  final bool touchUpOn;
+  final double touchUp;
+  final TouchUpChange? onTouchUp;
 
   @override
   State<BackgroundPicker> createState() => _BackgroundPickerState();
@@ -64,6 +81,25 @@ class _BackgroundPickerState extends State<BackgroundPicker> {
   Uint8List? _own;
   bool _busy = false;
   String? _error;
+  late bool _touchUpOn = widget.touchUpOn;
+  late double _touchUp = widget.touchUp.clamp(0.1, 1.0);
+
+  Future<void> _changeTouchUp(bool on, double amount) async {
+    final before = (_touchUpOn, _touchUp);
+    setState(() {
+      _touchUpOn = on;
+      _touchUp = amount;
+      _error = null;
+    });
+    final ok = await widget.onTouchUp!(on, amount);
+    if (!ok && mounted) {
+      setState(() {
+        _touchUpOn = before.$1;
+        _touchUp = before.$2;
+        _error = 'Couldn\'t touch up your video.';
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -161,6 +197,31 @@ class _BackgroundPickerState extends State<BackgroundPicker> {
               ),
               const SizedBox(height: 12),
               Wrap(spacing: 12, runSpacing: 12, children: tiles),
+              if (widget.onTouchUp != null) ...[
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Touch up appearance'),
+                  subtitle: const Text('Softens fine detail on your skin.'),
+                  value: _touchUpOn,
+                  onChanged: (on) => _changeTouchUp(on, _touchUp),
+                ),
+                Slider(
+                  value: _touchUp,
+                  min: 0.1,
+                  label: '${(_touchUp * 100).round()}%',
+                  divisions: 9,
+                  semanticFormatterCallback: (v) =>
+                      'Touch up ${(v * 100).round()}%',
+                  // Taken up on release rather than at every step of a drag.
+                  onChanged: _touchUpOn
+                      ? (v) => setState(() => _touchUp = v)
+                      : null,
+                  onChangeEnd: _touchUpOn
+                      ? (v) => _changeTouchUp(true, v)
+                      : null,
+                ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 Text(_error!, style: TextStyle(color: scheme.error)),

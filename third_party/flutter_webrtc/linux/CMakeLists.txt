@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 set(PROJECT_NAME "flutter_webrtc")
-project(${PROJECT_NAME} LANGUAGES CXX)
+project(${PROJECT_NAME} LANGUAGES C CXX)
 
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
   cmake_policy(SET CMP0135 NEW)
@@ -38,6 +38,7 @@ add_library(${PLUGIN_NAME} SHARED
   "portal_screencast.cc"
   "selfie_segmenter.cc"
   "background_blur.cc"
+  "noise_suppressor.cc"
 )
 
 include_directories(
@@ -70,6 +71,34 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 # SPA's headers trip these with -Werror.
 set_source_files_properties(portal_screencast.cc PROPERTIES
   COMPILE_OPTIONS "-Wno-missing-field-initializers;-Wno-unused-parameter")
+
+# Tala: noise cancellation (noise_suppressor.cc) runs Xiph's RNNoise 0.2,
+# kept in third_party/rnnoise. Built on its own, without Flutter's -Werror,
+# and with its symbols hidden inside the plugin.
+set(TALA_RNNOISE "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/rnnoise")
+add_library(tala_rnnoise STATIC
+  "${TALA_RNNOISE}/src/denoise.c"
+  "${TALA_RNNOISE}/src/rnn.c"
+  "${TALA_RNNOISE}/src/pitch.c"
+  "${TALA_RNNOISE}/src/kiss_fft.c"
+  "${TALA_RNNOISE}/src/celt_lpc.c"
+  "${TALA_RNNOISE}/src/nnet.c"
+  "${TALA_RNNOISE}/src/nnet_default.c"
+  "${TALA_RNNOISE}/src/parse_lpcnet_weights.c"
+  "${TALA_RNNOISE}/src/rnnoise_data.c"
+  "${TALA_RNNOISE}/src/rnnoise_tables.c"
+)
+set_target_properties(tala_rnnoise PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  C_VISIBILITY_PRESET hidden)
+target_include_directories(tala_rnnoise
+  PUBLIC "${TALA_RNNOISE}/include"
+  PRIVATE "${TALA_RNNOISE}/src")
+target_compile_definitions(tala_rnnoise PUBLIC "RNNOISE_EXPORT=")
+# Its note that only SSE2 is in use is expected: the build targets any x86-64.
+target_compile_options(tala_rnnoise PRIVATE -O2 -Wno-cpp)
+target_link_libraries(tala_rnnoise PRIVATE m)
+target_link_libraries(${PLUGIN_NAME} PRIVATE tala_rnnoise)
 
 # GCC 14+ (and notably GCC 16) tightened transitive header inclusion, so the
 # bundled libwebrtc headers (e.g. third_party/libwebrtc/include/rtc_types.h)

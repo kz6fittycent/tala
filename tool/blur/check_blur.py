@@ -2,10 +2,13 @@
 
     /tmp/v/bin/pip install numpy pillow
     /tmp/v/bin/python tool/blur/check_blur.py picture.jpg out-dir [background.jpg]
+    /tmp/v/bin/python tool/blur/check_blur.py --touch-up=0.7 picture.jpg out-dir
 
 Writes blur-<width>x<height>.png for a 1280x720 and a 640x480 camera frame
 made from the picture (stretched, as a camera's would be framed). With a
 background, it goes behind the person instead, into background-<w>x<h>.png.
+With --touch-up, the background is left alone and the person's skin is
+smoothed instead, into touchup-<w>x<h>.png.
 """
 import os
 import subprocess
@@ -43,7 +46,7 @@ def from_i420(data, w, h):
     return Image.fromarray(np.clip(rgb + 0.5, 0, 255).astype(np.uint8))
 
 
-def main(picture, out_dir, background=None):
+def main(picture, out_dir, background=None, touch_up=None):
     tmp = tempfile.mkdtemp()
     exe = os.path.join(tmp, 'check')
     subprocess.run(['g++', '-std=c++14', '-O3', '-Wall', '-Werror', '-I', SRC,
@@ -62,13 +65,17 @@ def main(picture, out_dir, background=None):
         frame = np.asarray(src.resize((w, h), Image.BILINEAR))
         fin, fout = os.path.join(tmp, 'in'), os.path.join(tmp, 'out')
         open(fin, 'wb').write(to_i420(frame))
-        r = subprocess.run([exe, str(w), str(h), fin, fout, '30'] + extra, check=True,
+        flags = ['--no-blur', f'--touch-up={touch_up}'] if touch_up else []
+        r = subprocess.run([exe, str(w), str(h), fin, fout, '30'] + extra + flags, check=True,
                            capture_output=True, text=True)
         print(r.stdout.strip())
-        path = os.path.join(out_dir, f"{'background' if background else 'blur'}-{w}x{h}.png")
+        kind = 'touchup' if touch_up else 'background' if background else 'blur'
+        path = os.path.join(out_dir, f'{kind}-{w}x{h}.png')
         from_i420(open(fout, 'rb').read(), w, h).save(path)
         print('  ->', path)
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:])
+    args = [a for a in sys.argv[1:] if not a.startswith('--touch-up=')]
+    amount = [a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('--touch-up=')]
+    main(*args, touch_up=amount[0] if amount else None)

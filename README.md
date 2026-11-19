@@ -23,8 +23,10 @@ The people and conversations in these pictures are made up.
 - Chat with replies, reactions, @ mentions, avatars, Markdown, polls, read
   ticks, typing indicators, message search, editing, deleting, file uploads (by
   button or drag and drop, with progress) and image previews
-- Audio and video calls, with ringing for incoming calls, screen sharing, and a
-  blurred background or a picture behind you (one of Tala's or your own)
+- Audio and video calls, with ringing for incoming calls, screen sharing, a
+  blurred background or a picture behind you (one of Tala's or your own),
+  touch up for your appearance, and noise cancellation that takes keyboards,
+  fans and other background noise out of your microphone
 - Group conversations: create them, add and remove people, groups and teams,
   choose moderators, rename and describe them
 - Online, away and Do not disturb status, yours (on your avatar at the top,

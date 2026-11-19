@@ -119,6 +119,8 @@ class Call extends ChangeNotifier {
     this.answering = false,
     this.openMedia,
     this.background = CallBackground.none,
+    this.touchUp = 0,
+    this.noiseCancel = false,
     this.loadPicture = loadBackground,
   });
   final NcApi api;
@@ -182,9 +184,23 @@ class Call extends ChangeNotifier {
   /// Reads the picture for a background; replaceable in tests.
   final Future<BackgroundPicture?> Function(CallBackground) loadPicture;
 
-  /// What the camera track's processor is showing now; none when there's no
-  /// processor attached.
-  CallBackground _attached = CallBackground.none;
+  /// How much the user's skin is smoothed in their video, from 0 (not at
+  /// all) to 1. Done by the same processor as [background].
+  double touchUp;
+
+  /// Background noise taken out of the user's microphone (RNNoise, in the
+  /// WebRTC plugin, Linux only).
+  bool noiseCancel;
+
+  /// What the camera track's processor is doing now; none and 0 when there's
+  /// no processor attached.
+  (CallBackground, double) _attached = (CallBackground.none, 0);
+
+  /// The last picture read, so changing touch up doesn't read it again.
+  (CallBackground, BackgroundPicture)? _picture;
+
+  /// The picture is to be read and sent again even if it's the same choice.
+  bool _reread = false;
 
   /// Background changes run one at a time, in order.
   Future<bool> _backgroundQueue = Future.value(true);
@@ -349,6 +365,7 @@ class Call extends ChangeNotifier {
       }
       localRenderer.srcObject = stream;
       await _applyBackground();
+      if (audio) await _applyNoiseCancel();
       if (!_mesh) await _publish();
     } else {
       await _discard(Future.value(stream));
@@ -1070,6 +1087,9 @@ class Call extends ChangeNotifier {
   Future<bool> setBackground(CallBackground wanted) async {
     final before = background;
     background = wanted;
+    // Picked again, the user's own picture may have just been replaced.
+    _picture = null;
+    _reread = true;
     notifyListeners();
     final ok = await _applyBackground();
     if (!ok && background == wanted) {
@@ -1080,9 +1100,74 @@ class Call extends ChangeNotifier {
     return ok;
   }
 
-  /// Brings the camera track's processor in line with [background]: it runs
-  /// only while wanted and the camera is on. Returns false if it was wanted
-  /// but couldn't be attached or its picture couldn't be read.
+  /// Changes how much the user's skin is smoothed, 0 for not at all. Returns
+  /// false if it couldn't be done, leaving it as it was.
+  Future<bool> setTouchUp(double wanted) async {
+    final before = touchUp;
+    final value = wanted.clamp(0.0, 1.0);
+    touchUp = value;
+    notifyListeners();
+    final ok = await _applyBackground();
+    if (!ok && touchUp == value) {
+      touchUp = before;
+      notifyListeners();
+      await _applyBackground();
+    }
+    return ok;
+  }
+
+  /// Switches noise cancellation. Returns false if it couldn't be switched
+  /// on; it's then left off.
+  Future<bool> setNoiseCancel(bool wanted) async {
+    noiseCancel = wanted;
+    notifyListeners();
+    final ok = await _applyNoiseCancel();
+    if (!ok && noiseCancel == wanted && wanted) {
+      noiseCancel = false;
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  /// The processor is shared by every microphone, so it follows the call:
+  /// on with [noiseCancel] while there's a mic, off when the call ends.
+  Future<bool> _applyNoiseCancel() async {
+    final want = noiseCancel && !_ended &&
+        (_local?.getAudioTracks().isNotEmpty ?? false);
+    try {
+      final r = await WebRTC.invokeMethod(
+          'setNoiseCancellation', {'enabled': want});
+      if (want) {
+        log('call: noise cancellation ${r == true ? 'on' : 'unavailable'}');
+        if (r == true) unawaited(_checkNoiseCancel());
+      }
+      return !want || r == true;
+    } catch (e) {
+      log('call: noise cancellation failed: $e');
+      return !want;
+    }
+  }
+
+  /// Notes in the log whether audio is going through it, since nothing on
+  /// screen would show it isn't.
+  Future<void> _checkNoiseCancel() async {
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (_ended || !noiseCancel) return;
+    try {
+      final r = await WebRTC.invokeMethod('getNoiseCancellation');
+      if (r is Map) {
+        log('call: noise cancellation '
+            '${r['working'] == true ? 'working' : 'not reaching the audio'}');
+      }
+    } catch (e) {
+      log('call: noise cancellation check failed: $e');
+    }
+  }
+
+  /// Brings the camera track's processor in line with [background] and
+  /// [touchUp]: it runs only while wanted and the camera is on. Returns false
+  /// if it was wanted but couldn't be attached or its picture couldn't be
+  /// read.
   Future<bool> _applyBackground() {
     return _backgroundQueue = _backgroundQueue.then((_) async {
       try {
@@ -1095,13 +1180,20 @@ class Call extends ChangeNotifier {
   }
 
   Future<bool> _applyBackgroundNow() async {
-    final want =
-        camOn && !_ended ? background : CallBackground.none;
+    final on = camOn && !_ended;
+    final want = on ? background : CallBackground.none;
+    final smooth = on ? touchUp : 0.0;
+    final enabled = want != CallBackground.none || smooth > 0;
     final tracks = _local?.getVideoTracks() ?? const <MediaStreamTrack>[];
-    if (tracks.isEmpty || want == _attached) return true;
+    if (tracks.isEmpty) return true;
+    if ((want, smooth) == _attached && !(_reread && want.isPicture)) {
+      return true;
+    }
+    _reread = false;
     BackgroundPicture? picture;
     if (want.isPicture) {
-      picture = await loadPicture(want);
+      picture = _picture?.$1 == want ? _picture!.$2 : await loadPicture(want);
+      _picture = picture == null ? null : (want, picture);
       if (picture == null) {
         log('call: background picture unavailable');
         return false;
@@ -1114,24 +1206,27 @@ class Call extends ChangeNotifier {
       try {
         final r = await WebRTC.invokeMethod('setBackgroundBlur', {
           'trackId': id,
-          'enabled': want != CallBackground.none,
+          'enabled': enabled,
+          'blur': want == CallBackground.blur,
+          'touchUp': smooth,
           if (picture != null) ...{
             'picture': picture.rgba,
             'width': picture.width,
             'height': picture.height,
           },
         });
-        if (want != CallBackground.none && r != true) ok = false;
+        if (enabled && r != true) ok = false;
       } catch (e) {
         log('call: background failed: $e');
-        ok = want == CallBackground.none;
+        ok = !enabled;
       }
     }
-    _attached = ok ? want : CallBackground.none;
+    _attached = ok ? (want, smooth) : (CallBackground.none, 0.0);
     if (want != CallBackground.none) {
       final kind = want.isPicture ? 'picture' : 'blur';
       log('call: background $kind ${ok ? 'on' : 'unavailable'}');
     }
+    if (smooth > 0) log('call: touch up ${ok ? 'on' : 'unavailable'}');
     return ok;
   }
 
@@ -1152,8 +1247,9 @@ class Call extends ChangeNotifier {
       await _dropScreen(s);
     }
     await _publisher?.pc.close();
-    // _ended makes this detach the processor before the track goes.
+    // _ended makes these detach the processors before the tracks go.
     await _applyBackground();
+    if (noiseCancel) await _applyNoiseCancel();
     for (final t in _local?.getTracks() ?? <MediaStreamTrack>[]) {
       await t.stop();
     }
