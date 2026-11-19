@@ -109,6 +109,12 @@ String mediaNote({
   return '$status (no camera or mic)';
 }
 
+/// What calls ask the camera for: 1080p at up to 60 frames a second (the
+/// user's choice, 2026-11-19). Cameras that can't do it give their nearest
+/// size and rate, and WebRTC sends less when the connection or processor
+/// can't keep up. Background effects cost about twice what they did at 720p.
+const callVideo = {'width': 1920, 'height': 1080, 'frameRate': 60};
+
 class Call extends ChangeNotifier {
   /// The call in progress, so quitting from the tray can hang it up first.
   static Call? current;
@@ -323,7 +329,7 @@ class Call extends ChangeNotifier {
     try {
       return await navigator.mediaDevices.getUserMedia({
         'audio': true,
-        'video': {'width': 1280, 'height': 720, 'frameRate': 30},
+        'video': callVideo,
       });
     } catch (e) {
       log('call: camera and mic failed: $e');

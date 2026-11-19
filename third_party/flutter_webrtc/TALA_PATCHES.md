@@ -30,7 +30,7 @@ The libwebrtc build already lets an `RTCVideoProcessor` change every local frame
 - `common/cpp/src/flutter_webrtc.cc` and its header: the `setBackgroundBlur` method (`trackId`, `enabled`, optional `picture` bytes with `width` and `height`, optional `blur` (default true; false leaves the background alone when there's no picture) and `touchUp` (0 to 1); returns whether the processor is attached; calling again on an attached track switches), Linux only. Processors are freed when turned off, when their track is gone, and in the destructor.
 - `linux/CMakeLists.txt`: builds the two new sources.
 
-On a Ryzen 7 3700X, the model takes about 7 ms, the whole blur about 17 ms, a picture about 15 ms, touch up alone about 20 ms and touch up with blur about 24 ms per 1280x720 frame on one core (`tool/blur/check_blur.py --touch-up=0.5`).
+Tala asks for 1080p at up to 60 fps, so the full-size passes (blending, touch up), the guided filter's box blurs and the three planes' blurs are split across up to four threads (`ParallelRows`), and the model runs at most every 25 ms (every other frame at 60 fps; the mask is smoothed over frames anyway). The output is byte for byte what one thread gives. On a Ryzen 7 3700X at 1920x1080 and 60 fps, a frame takes about 13 ms with blur, 11 ms with a picture, 13 ms with touch up alone and 17 ms with touch up and blur (just under 60 fps), costing about 1.7, 1.3, 1.2 and 2.3 cores; at 30 fps about 0.95, 0.8, 0.7 and 1.25 cores. Threads cost about a quarter more processor time than one thread doing the same work. `tool/blur/check_blur_main.cc --fps=60` times it that way.
 
 ## Noise cancellation (Linux)
 

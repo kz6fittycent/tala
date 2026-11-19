@@ -1,7 +1,9 @@
 #include "background_blur.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 namespace tala {
 namespace {
@@ -49,6 +51,28 @@ constexpr float kSkinSoft = 8.0f;
 // The most of that pull the slider's top end gives: much more looks waxy,
 // with the strongest specks left standing out.
 constexpr float kTouchMost = 0.7f;
+
+// Runs fn(y0, y1) over rows 0 to h, split across up to four threads, the
+// calling one among them. At 1080p a single core can't do every pass of a
+// frame in a 60 fps frame's time; the work is the same, it just ends sooner.
+// Frames come one at a time, so threads are started per pass: tens of
+// microseconds against milliseconds of work.
+template <typename F>
+void ParallelRows(int h, F fn) {
+  static const int most =
+      std::max(1, std::min(4, static_cast<int>(
+                                  std::thread::hardware_concurrency() / 2)));
+  // Rows come in hundreds; a handful of whole tasks (h below 8) each get one.
+  const int n = std::min(most, h < 8 ? h : std::max(1, h / 128));
+  if (n == 1) {
+    fn(0, h);
+    return;
+  }
+  std::vector<std::thread> threads;
+  for (int i = 1; i < n; i++) threads.emplace_back(fn, h * i / n, h * (i + 1) / n);
+  fn(0, h / n);
+  for (auto& t : threads) t.join();
+}
 
 uint8_t Clamp8(float v) {
   return static_cast<uint8_t>(std::min(std::max(v + 0.5f, 0.0f), 255.0f));
@@ -150,24 +174,26 @@ void Blend(const uint8_t* in, int stride, int w, int h,
   Axis(h, mh, my, mfy);
   Axis(w, sw, bx, bfx);
   Axis(h, sh, by, bfy);
-  std::vector<float> mrow(mw), brow(sw);
-  for (int y = 0; y < h; y++) {
-    VerticalLerp(mask.data(), mw, mh, my[y], mfy[y], mrow.data());
-    VerticalLerp(small.data(), sw, sh, by[y], bfy[y], brow.data());
-    const uint8_t* row = in + static_cast<size_t>(y) * stride;
-    uint8_t* o = out + static_cast<size_t>(y) * w;
-    for (int x = 0; x < w; x++) {
-      const int m0 = mx[x], m1 = std::min(m0 + 1, mw - 1);
-      const float m = mrow[m0] + (mrow[m1] - mrow[m0]) * mfx[x];
-      if (m >= 0.999f) {
-        o[x] = row[x];
-        continue;
+  ParallelRows(h, [&](int y0, int y1) {
+    std::vector<float> mrow(mw), brow(sw);
+    for (int y = y0; y < y1; y++) {
+      VerticalLerp(mask.data(), mw, mh, my[y], mfy[y], mrow.data());
+      VerticalLerp(small.data(), sw, sh, by[y], bfy[y], brow.data());
+      const uint8_t* row = in + static_cast<size_t>(y) * stride;
+      uint8_t* o = out + static_cast<size_t>(y) * w;
+      for (int x = 0; x < w; x++) {
+        const int m0 = mx[x], m1 = std::min(m0 + 1, mw - 1);
+        const float m = mrow[m0] + (mrow[m1] - mrow[m0]) * mfx[x];
+        if (m >= 0.999f) {
+          o[x] = row[x];
+          continue;
+        }
+        const int b0 = bx[x], b1 = std::min(b0 + 1, sw - 1);
+        const float b = brow[b0] + (brow[b1] - brow[b0]) * bfx[x];
+        o[x] = Clamp8(b + (row[x] - b) * m);
       }
-      const int b0 = bx[x], b1 = std::min(b0 + 1, sw - 1);
-      const float b = brow[b0] + (brow[b1] - brow[b0]) * bfx[x];
-      o[x] = Clamp8(b + (row[x] - b) * m);
     }
-  }
+  });
 }
 
 // Bilinear resize of a float plane, half pixel centers.
@@ -192,17 +218,19 @@ void Resample(const std::vector<float>& src, int sw, int sh, int dw, int dh,
 // He, Sun and Tang's guided filter: makes `p` follow the edges of the guide
 // picture `g`. Both w by h; the result goes back into `p`, clamped to 0..1.
 void GuidedFilter(const std::vector<float>& g, std::vector<float>& p, int w,
-                  int h, int r, float eps, std::vector<float>& tmp) {
+                  int h, int r, float eps) {
   const size_t n = g.size();
   std::vector<float> mean_g = g, mean_p = p, gg(n), gp(n);
   for (size_t i = 0; i < n; i++) {
     gg[i] = g[i] * g[i];
     gp[i] = g[i] * p[i];
   }
-  BoxBlur(mean_g, w, h, r, tmp);
-  BoxBlur(mean_p, w, h, r, tmp);
-  BoxBlur(gg, w, h, r, tmp);
-  BoxBlur(gp, w, h, r, tmp);
+  // The four blurs are independent, so each gets a thread.
+  std::vector<float>* planes[4] = {&mean_g, &mean_p, &gg, &gp};
+  ParallelRows(4, [&](int i0, int i1) {
+    std::vector<float> own;
+    for (int i = i0; i < i1; i++) BoxBlur(*planes[i], w, h, r, own);
+  });
   // gg and gp become the a and b of each window.
   for (size_t i = 0; i < n; i++) {
     const float var = gg[i] - mean_g[i] * mean_g[i];
@@ -211,8 +239,10 @@ void GuidedFilter(const std::vector<float>& g, std::vector<float>& p, int w,
     gg[i] = a;
     gp[i] = mean_p[i] - a * mean_g[i];
   }
-  BoxBlur(gg, w, h, r, tmp);
-  BoxBlur(gp, w, h, r, tmp);
+  ParallelRows(2, [&](int i0, int i1) {
+    std::vector<float> own;
+    for (int i = i0; i < i1; i++) BoxBlur(*planes[2 + i], w, h, r, own);
+  });
   for (size_t i = 0; i < n; i++) {
     p[i] = std::min(std::max(gg[i] * g[i] + gp[i], 0.0f), 1.0f);
   }
@@ -327,42 +357,64 @@ void BackgroundBlur::Segment(const I420& in) {
 
 void BackgroundBlur::TouchUp(const I420& in, int gw, int gh) {
   smooth_ = guide_;
-  GuidedFilter(guide_, smooth_, gw, gh, kTouchRadius, kTouchEps, scratch_);
+  GuidedFilter(guide_, smooth_, gw, gh, kTouchRadius, kTouchEps);
   const int w = in.width, h = in.height;
   touched_.resize(static_cast<size_t>(w) * h);
   std::vector<int> xs, ys;
   std::vector<float> fx, fy;
   Axis(w, gw, xs, fx);
   Axis(h, gh, ys, fy);
-  std::vector<float> srow(gw), mrow(gw);
   const float inv = 1 / (kTouchDetail * kTouchDetail);
-  for (int y = 0; y < h; y++) {
-    VerticalLerp(smooth_.data(), gw, gh, ys[y], fy[y], srow.data());
-    VerticalLerp(refined_.data(), gw, gh, ys[y], fy[y], mrow.data());
-    const uint8_t* row = in.y + static_cast<size_t>(y) * in.stride_y;
-    const uint8_t* u = in.u + static_cast<size_t>(y / 2) * in.stride_u;
-    const uint8_t* v = in.v + static_cast<size_t>(y / 2) * in.stride_v;
-    uint8_t* o = &touched_[static_cast<size_t>(y) * w];
-    for (int x = 0; x < w; x++) {
-      const int a = xs[x], b = std::min(a + 1, gw - 1);
-      const float person = mrow[a] + (mrow[b] - mrow[a]) * fx[x];
-      const float skin = Ramp(u[x / 2], 77, 127) * Ramp(v[x / 2], 133, 173);
-      const float weight = kTouchMost * touch_up_ * person * skin;
-      if (weight < 0.01f) {
-        o[x] = row[x];
-        continue;
+  const int cw = (w + 1) / 2;
+  const float amount = kTouchMost * touch_up_;
+  ParallelRows(h, [&](int y0, int y1) {
+    std::vector<float> srow(gw), mrow(gw), skin(cw);
+    int skin_y = -1;
+    for (int y = y0; y < y1; y++) {
+      VerticalLerp(smooth_.data(), gw, gh, ys[y], fy[y], srow.data());
+      VerticalLerp(refined_.data(), gw, gh, ys[y], fy[y], mrow.data());
+      // How much each chroma pixel looks like skin, shared by its two rows.
+      if (y / 2 != skin_y) {
+        skin_y = y / 2;
+        const uint8_t* u = in.u + static_cast<size_t>(skin_y) * in.stride_u;
+        const uint8_t* v = in.v + static_cast<size_t>(skin_y) * in.stride_v;
+        for (int x = 0; x < cw; x++) {
+          skin[x] = amount * Ramp(u[x], 77, 127) * Ramp(v[x], 133, 173);
+        }
       }
-      const float base = 255 * (srow[a] + (srow[b] - srow[a]) * fx[x]);
-      const float d = row[x] - base;
-      const float t = d * d * inv;
-      o[x] = Clamp8(row[x] - weight * d / (1 + t * t));
+      const uint8_t* row = in.y + static_cast<size_t>(y) * in.stride_y;
+      uint8_t* o = &touched_[static_cast<size_t>(y) * w];
+      for (int x = 0; x < w; x++) {
+        const float s = skin[x / 2];
+        if (s <= 0) {
+          o[x] = row[x];
+          continue;
+        }
+        const int a = xs[x], b = std::min(a + 1, gw - 1);
+        const float weight = s * (mrow[a] + (mrow[b] - mrow[a]) * fx[x]);
+        if (weight < 0.01f) {
+          o[x] = row[x];
+          continue;
+        }
+        const float base = 255 * (srow[a] + (srow[b] - srow[a]) * fx[x]);
+        const float d = row[x] - base;
+        const float t = d * d * inv;
+        o[x] = Clamp8(row[x] - weight * d / (1 + t * t));
+      }
     }
-  }
+  });
 }
 
 void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
                            uint8_t* out_v) {
-  Segment(in);
+  // The model runs at most every kModelGap: at 60 fps every other frame,
+  // which the mask's smoothing over frames already hides.
+  const auto now = std::chrono::steady_clock::now();
+  if (mask_width_ != in.width || mask_height_ != in.height ||
+      now - last_model_ >= model_gap_) {
+    Segment(in);
+    last_model_ = now;
+  }
   // The model's mask, refined against the picture's brightness at about
   // kGuideWidth, so the edge lands on the person's real outline.
   const int gf = std::max(1, in.width / kGuideWidth);
@@ -370,7 +422,7 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
   Shrink(in.y, in.width, in.height, in.stride_y, gf, guide_, gw, gh);
   for (float& v : guide_) v /= 255;
   Resample(mask_, kMaskW, kMaskH, gw, gh, refined_);
-  GuidedFilter(guide_, refined_, gw, gh, kGuideRadius, kGuideEps, scratch_);
+  GuidedFilter(guide_, refined_, gw, gh, kGuideRadius, kGuideEps);
   // A gentle S-curve: the model's unsure fringe leans to one side or the
   // other instead of showing half sharp. Anything harder turns that fringe
   // into sharp cutouts.
@@ -421,35 +473,40 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
   const int widths[3] = {in.width, cw, cw};
   const int heights[3] = {in.height, ch, ch};
   uint8_t* outs[3] = {out_y, out_u, out_v};
-  for (int i = 0; i < 3; i++) {
-    // Chroma is already half size, so it shrinks by half as much.
-    const int f = i == 0 ? factor : std::max(1, factor / 2);
-    int sw, sh;
-    Shrink(planes[i], widths[i], heights[i], strides[i], f, small_[i], sw, sh);
-    // The same reach in camera pixels for every plane: kBlurRadius luma
-    // small pixels are kBlurRadius * factor camera pixels, and a chroma small
-    // pixel covers 2 * f.
-    const int scale = i == 0 ? factor : 2 * f;
-    const int r = std::max(1, (kBlurRadius * factor + scale / 2) / scale);
-    // Only the background is blurred, each pixel weighted by how much it is
-    // background, so the person's colors don't spread into a halo around
-    // them. Where there's no background nearby, the person shows anyway.
-    Resample(refined_, gw, gh, sw, sh, weight_);
-    for (size_t k = 0; k < weight_.size(); k++) {
-      weight_[k] = 1 - weight_[k];
-      small_[i][k] *= weight_[k];
+  // The planes are independent, so each gets a thread.
+  ParallelRows(3, [&](int i0, int i1) {
+    for (int i = i0; i < i1; i++) {
+      std::vector<float>& weight = weight_[i];
+      std::vector<float>& scratch = scratch_planes_[i];
+      // Chroma is already half size, so it shrinks by half as much.
+      const int f = i == 0 ? factor : std::max(1, factor / 2);
+      int sw, sh;
+      Shrink(planes[i], widths[i], heights[i], strides[i], f, small_[i], sw, sh);
+      // The same reach in camera pixels for every plane: kBlurRadius luma
+      // small pixels are kBlurRadius * factor camera pixels, and a chroma small
+      // pixel covers 2 * f.
+      const int scale = i == 0 ? factor : 2 * f;
+      const int r = std::max(1, (kBlurRadius * factor + scale / 2) / scale);
+      // Only the background is blurred, each pixel weighted by how much it is
+      // background, so the person's colors don't spread into a halo around
+      // them. Where there's no background nearby, the person shows anyway.
+      Resample(refined_, gw, gh, sw, sh, weight);
+      for (size_t k = 0; k < weight.size(); k++) {
+        weight[k] = 1 - weight[k];
+        small_[i][k] *= weight[k];
+      }
+      for (int p = 0; p < kBlurPasses; p++) {
+        BoxBlur(small_[i], sw, sh, r, scratch);
+        BoxBlur(weight, sw, sh, r, scratch);
+      }
+      for (size_t k = 0; k < weight.size(); k++) {
+        small_[i][k] = weight[k] > 1e-3f ? small_[i][k] / weight[k]
+                                         : (i == 0 ? 16.0f : 128.0f);
+      }
+      Blend(planes[i], strides[i], widths[i], heights[i], small_[i], sw, sh,
+            refined_, gw, gh, outs[i]);
     }
-    for (int p = 0; p < kBlurPasses; p++) {
-      BoxBlur(small_[i], sw, sh, r, scratch_);
-      BoxBlur(weight_, sw, sh, r, scratch_);
-    }
-    for (size_t k = 0; k < weight_.size(); k++) {
-      small_[i][k] = weight_[k] > 1e-3f ? small_[i][k] / weight_[k]
-                                        : (i == 0 ? 16.0f : 128.0f);
-    }
-    Blend(planes[i], strides[i], widths[i], heights[i], small_[i], sw, sh,
-          refined_, gw, gh, outs[i]);
-  }
+  });
 }
 
 }  // namespace tala

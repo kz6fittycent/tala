@@ -100,6 +100,10 @@ target_compile_options(tala_rnnoise PRIVATE -O2 -Wno-cpp)
 target_link_libraries(tala_rnnoise PRIVATE m)
 target_link_libraries(${PLUGIN_NAME} PRIVATE tala_rnnoise)
 
+# Tala: background_blur.cc splits its passes across a few threads.
+find_package(Threads REQUIRED)
+target_link_libraries(${PLUGIN_NAME} PRIVATE Threads::Threads)
+
 # GCC 14+ (and notably GCC 16) tightened transitive header inclusion, so the
 # bundled libwebrtc headers (e.g. third_party/libwebrtc/include/rtc_types.h)
 # now fail to compile because they use fixed-width integer types such as

@@ -8,6 +8,7 @@
 #ifndef TALA_BACKGROUND_BLUR_H_
 #define TALA_BACKGROUND_BLUR_H_
 
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -43,6 +44,11 @@ class BackgroundBlur {
     touch_up_ = touch_up < 0 ? 0 : touch_up > 1 ? 1 : touch_up;
   }
 
+  // The shortest time between runs of the person model; frames in between
+  // reuse its last mask. 25 ms runs it on every frame at 30 fps and every
+  // other at 60. Zero runs it every frame (for timing checks).
+  void SetModelGap(std::chrono::milliseconds gap) { model_gap_ = gap; }
+
  private:
   void Segment(const I420& in);
   // Smooths fine detail on the person's skin into touched_ (width by height,
@@ -57,9 +63,9 @@ class BackgroundBlur {
   // is it fitted to the picture's edges at the guide's size.
   std::vector<float> mask_;
   int mask_width_ = 0, mask_height_ = 0;  // frame size mask_ belongs to
-  std::vector<float> guide_, refined_, weight_;
-  std::vector<float> small_[3];
-  std::vector<float> scratch_;
+  std::vector<float> guide_, refined_;
+  // Per plane, as the planes are blurred side by side.
+  std::vector<float> small_[3], weight_[3], scratch_planes_[3];
   // The picture in Y, U and V at its own size, all three full resolution;
   // empty when blurring.
   std::vector<float> picture_[3];
@@ -67,6 +73,8 @@ class BackgroundBlur {
   // picture_ fitted to the frame: Y at frame size, U and V at chroma size.
   std::vector<float> picture_scaled_[3];
   int scaled_width_ = 0, scaled_height_ = 0;  // frame size they belong to
+  std::chrono::steady_clock::time_point last_model_;
+  std::chrono::steady_clock::duration model_gap_ = std::chrono::milliseconds(25);
   bool blur_ = true;
   float touch_up_ = 0;
   std::vector<float> smooth_;

@@ -49,7 +49,7 @@ def from_i420(data, w, h):
 def main(picture, out_dir, background=None, touch_up=None):
     tmp = tempfile.mkdtemp()
     exe = os.path.join(tmp, 'check')
-    subprocess.run(['g++', '-std=c++14', '-O3', '-Wall', '-Werror', '-I', SRC,
+    subprocess.run(['g++', '-std=c++14', '-O3', '-pthread', '-Wall', '-Werror', '-I', SRC,
                     os.path.join(SRC, 'selfie_segmenter.cc'),
                     os.path.join(SRC, 'background_blur.cc'),
                     os.path.join(ROOT, 'tool/blur/check_blur_main.cc'), '-o', exe],

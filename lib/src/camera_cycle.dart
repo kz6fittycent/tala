@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'call.dart';
 import 'log.dart';
 
 /// Repeats the open, show, close sequence a call goes through, to reproduce
@@ -45,7 +46,7 @@ class _CameraCycleState extends State<CameraCycle> {
     await _timeOne('audio only', {'audio': true, 'video': false});
     await _timeOne('video only', {
       'audio': false,
-      'video': {'width': 1280, 'height': 720, 'frameRate': 30},
+      'video': callVideo,
     });
     await _timeOne('audio only again', {'audio': true, 'video': false});
     if (Platform.environment['TALA_TIMING_ONLY'] != null) exit(0);
@@ -55,7 +56,7 @@ class _CameraCycleState extends State<CameraCycle> {
       await r.initialize();
       final stream = await navigator.mediaDevices.getUserMedia({
         'audio': true,
-        'video': {'width': 1280, 'height': 720, 'frameRate': 30},
+        'video': callVideo,
       });
       log('cycle $i: media open after ${sw.elapsedMilliseconds}ms');
       r.srcObject = stream;
