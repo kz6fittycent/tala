@@ -5,7 +5,11 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 Status and decisions are kept in this file.
 
 ## Where things stand (2026-11-19)
-Built 2026-11-19 at the user's request, for 0.9.2, not yet tested in a real build: noise cancellation and touch up appearance (see Noise cancellation and touch up). The user has a new 4K webcam (arriving 2026-11-19) for testing. On the user's word (2026-11-19, "go to 1080p", "allow all 60fps"), calls ask cameras for 1920x1080 at up to 60 fps (`callVideo` in `call.dart`, also used by `camera_cycle.dart`); cameras give their nearest. That made background effects multithreaded (see Background blur).
+0.10.0 pushed 2026-11-19 (the user's approval), its candidate built by `snap-builds.yml`; nothing in it has run in a real build or call yet (no build is possible on skyfire), so everything below waits on the user's testing. 0.9.2 (pushed the same day, superseded before testing) is in it too. The user has a new 4K webcam (arriving 2026-11-19) for testing. What 0.10.0 adds:
+- Noise cancellation and touch up appearance (see Noise cancellation and touch up). Check the log for `call: noise cancellation working` (or `not reaching the audio`), and how touch up looks on the new camera.
+- 1080p at up to 60 fps (the user's word: "go to 1080p", "allow all 60fps"): `callVideo` in `call.dart`, also used by `camera_cycle.dart`; cameras give their nearest. Background effects were multithreaded for it, then moved to the GPU when there's a usable one (see Background blur). Check the log for `call: effects on gpu: …` or `on cpu: <why>`.
+- Views: speaker, grid, screen layouts, pinning, hiding own video, names on videos, speaking detection (see Views). Check that the focus and frame follow the speaker, names show, and the web client shows Tala users speaking.
+Open question from 2026-11-19: whether software video encoding (libwebrtc, VP8) dominates CPU at 1080p60 more than effects did; `top -H -p $(pidof tala)` in a call would show it. The GPU work doesn't touch encoding.
 
 0.9.1 went to stable on 2026-11-18 (the user promoting): `/giphy` GIF search and playback through the server's Giphy app (see GIFs). The user confirmed `/gif` working on the 0.9.1 candidate (2026-11-18, "works perfectly"). It was the last release built by the old two-workflow chain; `snap-builds.yml` now does everything in one run (see Repo and releases). The wiki has the GIF pages.
 
