@@ -10,6 +10,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "selfie_segmenter.h"
@@ -24,12 +27,32 @@ struct I420 {
   int stride_y = 0, stride_u = 0, stride_v = 0;
 };
 
+class GpuEffects;
+
 class BackgroundBlur {
  public:
+  BackgroundBlur();
+  ~BackgroundBlur();
+
   // Blurs `in` into the planes of `out_y`, `out_u` and `out_v`, which are
   // tightly packed: width by height, then twice (width+1)/2 by (height+1)/2.
   // Call from one thread at a time.
+  //
+  // The person model runs here; the rest runs on the GPU when there's a
+  // usable one (gpu_effects.h). Each kind of look is first done both ways
+  // on one frame, and the GPU is only used if it gave the same picture; it's
+  // dropped for good if it errs or turns out slower than this code.
   void Apply(const I420& in, uint8_t* out_y, uint8_t* out_u, uint8_t* out_v);
+
+  // Whether the GPU may be tried. Before the first Apply.
+  void SetGpuAllowed(bool allowed) {
+    gpu_allowed_ = allowed;
+    if (!allowed) SetEngine("cpu: GPU not allowed");
+  }
+
+  // What's doing the work, for the log: "gpu: <its name>", or "cpu" with
+  // why the GPU isn't in use. From any thread.
+  std::string Engine() const;
 
   // Shows `rgba` (width by height, 4 bytes a pixel, rows packed) behind the
   // person instead of blurring, filling the frame and cropped to its shape.
@@ -51,6 +74,13 @@ class BackgroundBlur {
 
  private:
   void Segment(const I420& in);
+  // Everything after the model, here on the CPU.
+  void ApplyCpu(const I420& in, uint8_t* out_y, uint8_t* out_u, uint8_t* out_v);
+  // The same on the GPU if it's in use; false if the CPU should do it.
+  bool ApplyGpu(const I420& in, uint8_t* out_y, uint8_t* out_u, uint8_t* out_v);
+  // Stops using the GPU for good.
+  void DropGpu(const std::string& why);
+  void SetEngine(const std::string& engine);
   // Smooths fine detail on the person's skin into touched_ (width by height,
   // rows packed), using guide_ and refined_ at the guide's size.
   void TouchUp(const I420& in, int gw, int gh);
@@ -79,6 +109,18 @@ class BackgroundBlur {
   float touch_up_ = 0;
   std::vector<float> smooth_;
   std::vector<uint8_t> touched_;
+
+  bool gpu_allowed_ = true;
+  bool gpu_tried_ = false;
+  std::unique_ptr<GpuEffects> gpu_;
+  int picture_version_ = 0;  // changes with the picture, for the GPU's copy
+  unsigned gpu_checked_ = 0;  // looks checked against the CPU, one bit each
+  double cpu_ms_ = 0;         // the CPU's time on the last check
+  int gpu_frames_ = 0;
+  double gpu_ms_ = 0;
+  std::vector<uint8_t> check_;
+  mutable std::mutex engine_mutex_;
+  std::string engine_ = "cpu: not started";
 };
 
 }  // namespace tala

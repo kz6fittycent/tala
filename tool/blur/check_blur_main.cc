@@ -2,10 +2,14 @@
 //   check_blur_main <width> <height> <in.yuv> <out.yuv> [runs
 //                   [<picture.rgba> <picture width> <picture height>]]
 //                   [--touch-up=<0 to 1>] [--no-blur] [--fps=<rate>]
+//                   [--cpu] [--compare]
 // With a picture, it goes behind the person instead of the blur; --no-blur
-// leaves the background alone. Prints the average time per frame, with the
-// person model run on every frame, or as often as it would be at --fps.
+// leaves the background alone. Prints which engine did it and the average
+// time per frame, with the person model run on every frame, or as often as
+// it would be at --fps. --cpu keeps off the GPU; --compare also runs the CPU
+// alone and prints how far the two pictures are apart.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -18,12 +22,17 @@ int main(int argc, char** argv) {
   float touch_up = 0;
   bool blur_background = true;
   int fps = 0;
+  bool cpu_only = false, compare = false;
   int kept = 1;
   for (int i = 1; i < argc; i++) {
     if (std::strncmp(argv[i], "--touch-up=", 11) == 0) {
       touch_up = std::atof(argv[i] + 11);
     } else if (std::strncmp(argv[i], "--fps=", 6) == 0) {
       fps = std::atoi(argv[i] + 6);
+    } else if (std::strcmp(argv[i], "--cpu") == 0) {
+      cpu_only = true;
+    } else if (std::strcmp(argv[i], "--compare") == 0) {
+      compare = true;
     } else if (std::strcmp(argv[i], "--no-blur") == 0) {
       blur_background = false;
     } else {
@@ -48,8 +57,11 @@ int main(int argc, char** argv) {
   frame.stride_y = w;
   frame.stride_u = frame.stride_v = cw;
   const int runs = argc > 5 ? std::atoi(argv[5]) : 1;
-  tala::BackgroundBlur blur;
+  tala::BackgroundBlur blur, cpu;
+  blur.SetGpuAllowed(!cpu_only);
+  cpu.SetGpuAllowed(false);
   blur.SetLook(blur_background, touch_up);
+  cpu.SetLook(blur_background, touch_up);
   // Frames come back to back here, so the model's pace is set by count:
   // every frame, or every other above 40 fps, as in a call.
   blur.SetModelGap(std::chrono::milliseconds(0));
@@ -61,6 +73,35 @@ int main(int argc, char** argv) {
       return 1;
     std::fclose(p);
     blur.SetPicture(rgba, pw, ph);
+    cpu.SetPicture(rgba, pw, ph);
+  }
+  if (compare) {
+    // Both in step, the model on every frame, then the last pictures side
+    // by side.
+    std::vector<uint8_t> other(out.size());
+    cpu.SetModelGap(std::chrono::milliseconds(0));
+    for (int i = 0; i < 10; i++) {
+      blur.Apply(frame, out.data(), out.data() + ys, out.data() + ys + cs);
+      cpu.Apply(frame, other.data(), other.data() + ys, other.data() + ys + cs);
+    }
+    int worst = 0;
+    size_t off1 = 0, off2 = 0;
+    double total = 0;
+    for (size_t i = 0; i < out.size(); i++) {
+      const int d = std::abs(out[i] - other[i]);
+      worst = std::max(worst, d);
+      off1 += d > 1;
+      off2 += d > 2;
+      total += d;
+    }
+    std::printf("%s\n%dx%d against the CPU: mean %.4f, most %d, %.3f%% over 1, "
+                "%.3f%% over 2\n",
+                blur.Engine().c_str(), w, h, total / out.size(), worst,
+                100.0 * off1 / out.size(), 100.0 * off2 / out.size());
+    f = std::fopen(argv[4], "wb");
+    std::fwrite(out.data(), 1, out.size(), f);
+    std::fclose(f);
+    return 0;
   }
   // A few frames first so the mask settles, as it would in a call.
   for (int i = 0; i < 5; i++)
@@ -74,7 +115,8 @@ int main(int argc, char** argv) {
                         std::chrono::steady_clock::now() - start)
                         .count() /
                     runs;
-  std::printf("%dx%d: %.2f ms per frame\n", w, h, ms);
+  std::printf("%s\n%dx%d: %.2f ms per frame\n", blur.Engine().c_str(), w, h,
+              ms);
   f = std::fopen(argv[4], "wb");
   std::fwrite(out.data(), 1, out.size(), f);
   std::fclose(f);

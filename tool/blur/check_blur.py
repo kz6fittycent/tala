@@ -4,7 +4,9 @@
     /tmp/v/bin/python tool/blur/check_blur.py picture.jpg out-dir [background.jpg]
     /tmp/v/bin/python tool/blur/check_blur.py --touch-up=0.7 picture.jpg out-dir
 
-Writes blur-<width>x<height>.png for a 1280x720 and a 640x480 camera frame
+Uses the GPU when there's one (as Tala does); check_blur_main.cc's --cpu and
+--compare check the two engines against each other. Writes
+blur-<width>x<height>.png for a 1280x720 and a 640x480 camera frame
 made from the picture (stretched, as a camera's would be framed). With a
 background, it goes behind the person instead, into background-<w>x<h>.png.
 With --touch-up, the background is left alone and the person's skin is
@@ -49,10 +51,13 @@ def from_i420(data, w, h):
 def main(picture, out_dir, background=None, touch_up=None):
     tmp = tempfile.mkdtemp()
     exe = os.path.join(tmp, 'check')
-    subprocess.run(['g++', '-std=c++14', '-O3', '-pthread', '-Wall', '-Werror', '-I', SRC,
+    epoxy = subprocess.run(['pkg-config', '--cflags', '--libs', 'epoxy'], check=True,
+                           capture_output=True, text=True).stdout.split()
+    subprocess.run(['g++', '-std=c++17', '-O3', '-pthread', '-Wall', '-Werror', '-I', SRC,
                     os.path.join(SRC, 'selfie_segmenter.cc'),
                     os.path.join(SRC, 'background_blur.cc'),
-                    os.path.join(ROOT, 'tool/blur/check_blur_main.cc'), '-o', exe],
+                    os.path.join(SRC, 'gpu_effects.cc'),
+                    os.path.join(ROOT, 'tool/blur/check_blur_main.cc'), '-o', exe] + epoxy,
                    check=True)
     src = Image.open(picture).convert('RGB')
     extra = []

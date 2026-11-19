@@ -152,6 +152,18 @@ void FlutterWebRTC::HandleMethodCall(
     result->Success(EncodableValue(SetBackgroundBlur(
         track_id, enabled, std::move(picture), width, height, blur,
         touch_up)));
+  } else if (method_call.method_name().compare("getBackgroundEngine") == 0) {
+    // {trackId}: "gpu: <name>" or "cpu: <why not the GPU>", or null when the
+    // track has no processor.
+    const EncodableMap params =
+        method_call.arguments() ? GetValue<EncodableMap>(*method_call.arguments())
+                                : EncodableMap();
+    auto found = blurs_.find(findString(params, "trackId"));
+    if (found == blurs_.end()) {
+      result->Success();
+    } else {
+      result->Success(EncodableValue(found->second->Engine()));
+    }
   } else if (method_call.method_name().compare("setNoiseCancellation") == 0) {
     // {enabled}. Returns whether the processor is in libwebrtc's audio
     // processing; the audio thread takes it up with the next 10 ms.

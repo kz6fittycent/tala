@@ -39,6 +39,7 @@ add_library(${PLUGIN_NAME} SHARED
   "selfie_segmenter.cc"
   "background_blur.cc"
   "noise_suppressor.cc"
+  "gpu_effects.cc"
 )
 
 include_directories(
@@ -99,6 +100,11 @@ target_compile_definitions(tala_rnnoise PUBLIC "RNNOISE_EXPORT=")
 target_compile_options(tala_rnnoise PRIVATE -O2 -Wno-cpp)
 target_link_libraries(tala_rnnoise PRIVATE m)
 target_link_libraries(${PLUGIN_NAME} PRIVATE tala_rnnoise)
+
+# Tala: background effects on the GPU (gpu_effects.cc) reach EGL and GL ES
+# through libepoxy, which GTK already depends on, so there's no driver to link.
+pkg_check_modules(TALA_EPOXY REQUIRED IMPORTED_TARGET epoxy)
+target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::TALA_EPOXY)
 
 # Tala: background_blur.cc splits its passes across a few threads.
 find_package(Threads REQUIRED)

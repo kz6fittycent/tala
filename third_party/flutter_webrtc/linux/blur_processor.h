@@ -6,6 +6,7 @@
 #define TALA_BLUR_PROCESSOR_H_
 
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,9 @@ class BlurProcessor : public libwebrtc::RTCVideoProcessor {
     pending_touch_up_ = touch_up;
     has_pending_ = true;
   }
+
+  // What's doing the work (see BackgroundBlur::Engine). From any thread.
+  std::string Engine() const { return blur_.Engine(); }
 
   // On the capture thread, one frame at a time.
   libwebrtc::scoped_refptr<libwebrtc::RTCVideoFrame> Process(

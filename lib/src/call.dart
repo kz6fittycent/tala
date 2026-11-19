@@ -1154,6 +1154,27 @@ class Call extends ChangeNotifier {
     }
   }
 
+  /// What did the effects last time, so the log says it once.
+  String? _engine;
+
+  /// Notes in the log whether background effects run on the GPU, and why
+  /// not if they don't. The processor decides on its first frames.
+  Future<void> _logEngine(String? trackId) async {
+    if (trackId == null) return;
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (_ended) return;
+    try {
+      final r = await WebRTC.invokeMethod(
+          'getBackgroundEngine', {'trackId': trackId});
+      if (r is String && r != _engine) {
+        _engine = r;
+        log('call: effects on $r');
+      }
+    } catch (e) {
+      log('call: effects engine check failed: $e');
+    }
+  }
+
   /// Notes in the log whether audio is going through it, since nothing on
   /// screen would show it isn't.
   Future<void> _checkNoiseCancel() async {
@@ -1233,6 +1254,7 @@ class Call extends ChangeNotifier {
       log('call: background $kind ${ok ? 'on' : 'unavailable'}');
     }
     if (smooth > 0) log('call: touch up ${ok ? 'on' : 'unavailable'}');
+    if (ok && enabled) unawaited(_logEngine(tracks.first.id));
     return ok;
   }
 

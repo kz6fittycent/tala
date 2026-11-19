@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <thread>
+
+#include "effects_tuning.h"
+#include "gpu_effects.h"
 
 namespace tala {
 namespace {
@@ -15,42 +19,7 @@ constexpr int kMaskH = SelfieSegmenter::kHeight;
 // keeps the edge from flickering.
 constexpr float kMaskFollow = 0.6f;
 
-// The mask's edge is refined against the picture at about this width: the
-// model's mask is 256 wide, so on a 1280 wide camera each of its pixels spans
-// five, too coarse to follow hair and shoulders.
-constexpr int kGuideWidth = 640;
-// Guided filter: box radius in guide pixels, and how much picture contrast it
-// takes to move the edge (pictures from 0 to 1). Smaller follows the picture
-// more closely, but also latches onto background texture beside the person.
-constexpr int kGuideRadius = 4;
-constexpr float kGuideEps = 0.02f;
-
-
-// The blurred copy is made at about this width, whatever the camera's size,
-// so the blur looks the same at any resolution.
-constexpr int kSmallWidth = 160;
-constexpr int kBlurRadius = 3;  // in small pixels, three box passes
-constexpr int kBlurPasses = 3;
-
-// With a picture behind the person, mask values below this count as
-// background: the model's unsure fringe carries the real room's color, which
-// shows as a halo against a different picture. Blurring hides it.
-constexpr float kPictureCut = 0.3f;
-
-// Touch up: each pixel of skin is pulled toward an edge-preserving smoothed
-// copy of the picture (a guided filter at the guide's size), but only as far
-// as it differs from it by a little: pores, blemishes and shine go, while
-// eyes, brows, lips and the edges of hair and glasses differ by more and stay.
-constexpr int kTouchRadius = 3;  // in guide pixels
-constexpr float kTouchEps = 0.003f;
-// Detail this strong, in Y levels, is half kept; much stronger is all kept.
-constexpr float kTouchDetail = 10.0f;
-// Skin's color, BT.601 limited range: the usual box of Cb 77 to 127 and Cr
-// 133 to 173, which holds across skin tones, eased in over this many levels.
-constexpr float kSkinSoft = 8.0f;
-// The most of that pull the slider's top end gives: much more looks waxy,
-// with the strongest specks left standing out.
-constexpr float kTouchMost = 0.7f;
+using namespace tuning;
 
 // Runs fn(y0, y1) over rows 0 to h, split across up to four threads, the
 // calling one among them. At 1080p a single core can't do every pass of a
@@ -271,9 +240,111 @@ float Ramp(float v, float lo, float hi) {
 
 }  // namespace
 
+BackgroundBlur::BackgroundBlur() = default;
+BackgroundBlur::~BackgroundBlur() = default;
+
+std::string BackgroundBlur::Engine() const {
+  std::lock_guard<std::mutex> lock(engine_mutex_);
+  return engine_;
+}
+
+void BackgroundBlur::SetEngine(const std::string& engine) {
+  std::lock_guard<std::mutex> lock(engine_mutex_);
+  engine_ = engine;
+}
+
+void BackgroundBlur::DropGpu(const std::string& why) {
+  gpu_.reset();
+  gpu_tried_ = true;
+  SetEngine("cpu: " + why);
+}
+
+bool BackgroundBlur::ApplyGpu(const I420& in, uint8_t* out_y, uint8_t* out_u,
+                              uint8_t* out_v) {
+  using Clock = std::chrono::steady_clock;
+  if (!gpu_allowed_) return false;
+  if (!gpu_) {
+    if (gpu_tried_) return false;
+    gpu_tried_ = true;
+    std::string why;
+    gpu_ = GpuEffects::Create(&why);
+    if (!gpu_) {
+      SetEngine("cpu: " + why);
+      return false;
+    }
+  }
+  GpuEffects::Look look;
+  look.mask = mask_.data();
+  look.mask_width = kMaskW;
+  look.mask_height = kMaskH;
+  if (picture_width_ > 0) {
+    FitPicture(in.width, in.height);
+    look.picture = picture_scaled_;
+  }
+  look.picture_version = picture_version_;
+  look.blur = blur_;
+  look.touch_up = touch_up_;
+  const unsigned kind = 1u << ((picture_width_ > 0 ? 4 : 0) |
+                               (blur_ ? 2 : 0) | (touch_up_ > 0 ? 1 : 0));
+  const int cw = (in.width + 1) / 2, ch = (in.height + 1) / 2;
+  const size_t ys = static_cast<size_t>(in.width) * in.height;
+  const size_t cs = static_cast<size_t>(cw) * ch;
+
+  if (!(gpu_checked_ & kind)) {
+    // Both ways on this frame; the CPU's picture goes out either way.
+    const auto t0 = Clock::now();
+    ApplyCpu(in, out_y, out_u, out_v);
+    cpu_ms_ = std::chrono::duration<double, std::milli>(Clock::now() - t0)
+                  .count();
+    check_.resize(ys + 2 * cs);
+    if (!gpu_->Apply(in, look, check_.data(), check_.data() + ys,
+                     check_.data() + ys + cs)) {
+      DropGpu("GPU error on " + gpu_->renderer());
+      return true;
+    }
+    // Rounding may differ by a level here and there; a real fault differs
+    // more, and in more places.
+    size_t off = 0;
+    const uint8_t* cpu[3] = {out_y, out_u, out_v};
+    const size_t sizes[3] = {ys, cs, cs};
+    size_t at = 0;
+    for (int p = 0; p < 3; p++) {
+      for (size_t i = 0; i < sizes[p]; i++) {
+        if (std::abs(cpu[p][i] - check_[at + i]) > 2) off++;
+      }
+      at += sizes[p];
+    }
+    if (off * 1000 > ys + 2 * cs) {
+      DropGpu("GPU's picture differed (" + gpu_->renderer() + ")");
+      return true;
+    }
+    gpu_checked_ |= kind;
+    gpu_frames_ = 0;
+    gpu_ms_ = 0;
+    SetEngine("gpu: " + gpu_->renderer());
+    return true;
+  }
+
+  const auto t0 = Clock::now();
+  if (!gpu_->Apply(in, look, out_y, out_u, out_v)) {
+    DropGpu("GPU error on " + gpu_->renderer());
+    return false;
+  }
+  // After a few frames to settle, 30 frames' time against the CPU's.
+  if (++gpu_frames_ > 5 && gpu_frames_ <= 35) {
+    gpu_ms_ += std::chrono::duration<double, std::milli>(Clock::now() - t0)
+                   .count();
+    if (gpu_frames_ == 35 && gpu_ms_ / 30 > cpu_ms_) {
+      DropGpu("GPU slower than the CPU (" + gpu_->renderer() + ")");
+    }
+  }
+  return true;
+}
+
 void BackgroundBlur::SetPicture(const std::vector<uint8_t>& rgba, int width,
                                 int height) {
   scaled_width_ = scaled_height_ = 0;
+  picture_version_++;
   if (width < 2 || height < 2 ||
       rgba.size() < static_cast<size_t>(width) * height * 4) {
     for (auto& p : picture_) p.clear();
@@ -415,6 +486,11 @@ void BackgroundBlur::Apply(const I420& in, uint8_t* out_y, uint8_t* out_u,
     Segment(in);
     last_model_ = now;
   }
+  if (!ApplyGpu(in, out_y, out_u, out_v)) ApplyCpu(in, out_y, out_u, out_v);
+}
+
+void BackgroundBlur::ApplyCpu(const I420& in, uint8_t* out_y, uint8_t* out_u,
+                              uint8_t* out_v) {
   // The model's mask, refined against the picture's brightness at about
   // kGuideWidth, so the edge lands on the person's real outline.
   const int gf = std::max(1, in.width / kGuideWidth);
