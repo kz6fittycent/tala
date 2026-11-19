@@ -4,7 +4,9 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 
 Status and decisions are kept in this file.
 
-## Where things stand (2026-11-16)
+## Where things stand (2026-11-18)
+0.9.1 went to stable on 2026-11-18 (the user promoting): `/giphy` GIF search and playback through the server's Giphy app (see GIFs). It was the last release built by the old two-workflow chain; `snap-builds.yml` now does everything in one run (see Repo and releases). The wiki has the GIF pages.
+
 0.9.0 went to stable on 2026-11-16 (the user promoting): pictures behind the person in calls (see Background blur), typing indicators (see Typing), a featured banner for the store, and an auto-connect request the user posted. The user confirmed background pictures and typing working on the 0.9.0 candidate (2026-11-16).
 
 0.8.2 went to stable on 2026-11-10 (the user promoting). It carries everything since 0.6.1: the 0.7.0 features (read ticks, call joined/left messages hidden, drafts kept across restarts, upload progress and Cancel, drag and drop, a reaction picker, presence, an unread badge on a call's closed chat button, adding groups and teams, conversation descriptions, polls; see "Added 2026-11-10"), then drag and drop fixed in the snap (0.7.1: `home` and `removable-media` plugs, portal targets first), own status no longer turned off by a never-set status (0.7.2), the user's avatar with status dot as the menu button (0.8.0), and background blur (0.8.1, smoother edges in 0.8.2; see Calls). 0.7.0 was set by hand; `bump_version.sh` counts x.y.0 to x.y.2, then the next minor, so 0.7.2 became 0.8.0 (the 0.8.0 commit is titled "Release 0.7.3" by mistake). The README and wiki were updated for all of it.
