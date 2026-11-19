@@ -189,13 +189,14 @@ class TileFrame extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         tile.video,
+        // At the top, clear of the call's controls along the bottom.
         if (name != null || pinned)
           Positioned(
             left: 6,
-            bottom: 6,
+            top: 6,
             right: 6,
             child: Align(
-              alignment: Alignment.bottomLeft,
+              alignment: Alignment.topLeft,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -375,9 +376,23 @@ class ScreenStage extends StatelessWidget {
     this.speaker,
     this.pinned,
     this.onPin,
+    this.self,
   });
+
+  /// Whether a stage with these would show [self] at the top of its column
+  /// of people, rather than leaving it to [CallLayout]'s corner, which would
+  /// cover that column.
+  static bool holdsSelf(
+    List<Widget> screens,
+    List<StageTile> people,
+    ScreenView view,
+  ) => screens.isNotEmpty && people.isNotEmpty && view == ScreenView.beside;
+
   final List<Widget> screens;
   final List<StageTile> people;
+
+  /// The user's own camera, shown only when [holdsSelf].
+  final Widget? self;
   final PeopleView peopleView;
   final ScreenView screenView;
   final String? speaker;
@@ -408,7 +423,14 @@ class ScreenStage extends StatelessWidget {
                 Expanded(child: screen),
                 SizedBox(
                   width: screenColumnWidth,
-                  child: _Strip(tiles: people, axis: Axis.vertical),
+                  child: _Strip(
+                    tiles: [
+                      if (self != null)
+                        StageTile(id: ' self', name: 'You', video: self!),
+                      ...people,
+                    ],
+                    axis: Axis.vertical,
+                  ),
                 ),
               ],
             ),

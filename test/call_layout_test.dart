@@ -319,6 +319,28 @@ void main() {
       expect(video(tester, 1).top, greaterThan(video(tester, 0).top));
     });
 
+    testWidgets('beside a screen, own video heads the column', (tester) async {
+      const screens = [SizedBox.expand(key: ValueKey('screen'))];
+      final people = tiles(2);
+      expect(ScreenStage.holdsSelf(screens, people, ScreenView.beside), isTrue);
+      expect(ScreenStage.holdsSelf(screens, people, ScreenView.below), isFalse);
+      expect(ScreenStage.holdsSelf(const [], people, ScreenView.beside),
+          isFalse);
+      await show(
+        tester,
+        ScreenStage(
+          screens: screens,
+          people: people,
+          screenView: ScreenView.beside,
+          self: const SizedBox.expand(key: ValueKey('self')),
+        ),
+      );
+      final self = tester.getRect(find.byKey(const ValueKey('self')));
+      expect(self.left, 1000 - screenColumnWidth + 4);
+      expect(self.top, lessThan(video(tester, 0).top));
+      expect(find.text('You'), findsOneWidget);
+    });
+
     testWidgets('screen only leaves people out', (tester) async {
       await show(
         tester,

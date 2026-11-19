@@ -1,4 +1,4 @@
-# Tala
+<h1><img src="assets/icon/tala-512.png" alt="" width="40" height="40" align="top"> Tala</h1>
 
 [![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/tala)
 

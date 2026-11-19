@@ -38,6 +38,7 @@ import 'src/licenses.dart';
 import 'src/report.dart';
 import 'src/report_view.dart';
 import 'src/search.dart';
+import 'src/call_controls.dart';
 import 'src/call_layout.dart';
 
 Future<void> main(List<String> args) async {
@@ -1243,92 +1244,58 @@ class _CallPageState extends State<CallPage> {
   /// leave.
   String? _pinned;
 
-  /// Speaker or grid, how a shared screen sits with people, and whether the
-  /// user's own camera shows, from the call's View button.
-  Widget _viewMenu() {
+  Widget _layout(BuildContext context) {
     final settings = widget.settings;
-    return MenuAnchor(
-      menuChildren: [
-        for (final v in PeopleView.values)
-          RadioMenuButton<PeopleView>(
-            value: v,
-            groupValue: settings.callPeopleView,
-            onChanged: (v) => setState(() => settings.callPeopleView = v!),
-            child: Text(v.label),
-          ),
-        const Divider(),
-        for (final v in ScreenView.values)
-          RadioMenuButton<ScreenView>(
-            value: v,
-            groupValue: settings.callScreenView,
-            onChanged: (v) => setState(() => settings.callScreenView = v!),
-            child: Text(v.label),
-          ),
-        const Divider(),
-        CheckboxMenuButton(
-          value: settings.callHideSelf,
-          onChanged: (v) => setState(() => settings.callHideSelf = v!),
-          child: const Text('Hide my own video'),
+    // Contain: a shared screen loses nothing to cropping.
+    final screens = <Widget>[
+      if (_call.ownScreen case final own?)
+        RTCVideoView(
+          own,
+          key: ObjectKey(own),
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
         ),
-      ],
-      builder: (context, menu, _) => IconButton.filled(
-        tooltip: 'View',
-        icon: Icon(settings.callPeopleView == PeopleView.speaker
-            ? Icons.view_agenda_outlined
-            : Icons.grid_view),
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-      ),
-    );
-  }
-
-  Widget _layout(BuildContext context) => CallLayout(
+      for (final r in _call.screens)
+        RTCVideoView(
+          r,
+          key: ObjectKey(r),
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+        ),
+    ];
+    // Cover crops to fill, whatever shape the other camera sends.
+    final people = [
+      for (final p in _call.people)
+        StageTile(
+          id: p.session,
+          name: p.name,
+          speaking: p.speaking,
+          video: RTCVideoView(
+            p.renderer,
+            key: ObjectKey(p.renderer),
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          ),
+        ),
+    ];
+    final self = settings.callHideSelf
+        ? null
+        : RTCVideoView(
+            _call.localRenderer,
+            mirror: true,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          );
+    final selfOnStage =
+        ScreenStage.holdsSelf(screens, people, settings.callScreenView);
+    return CallLayout(
             others: ScreenStage(
-              // Contain: a shared screen loses nothing to cropping.
-              screens: [
-                if (_call.ownScreen case final own?)
-                  RTCVideoView(
-                    own,
-                    key: ObjectKey(own),
-                    objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-                  ),
-                for (final r in _call.screens)
-                  RTCVideoView(
-                    r,
-                    key: ObjectKey(r),
-                    objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-                  ),
-              ],
-              // Cover crops to fill, whatever shape the other camera sends.
-              people: [
-                for (final p in _call.people)
-                  StageTile(
-                    id: p.session,
-                    name: p.name,
-                    speaking: p.speaking,
-                    video: RTCVideoView(
-                      p.renderer,
-                      key: ObjectKey(p.renderer),
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    ),
-                  ),
-              ],
-              peopleView: widget.settings.callPeopleView,
-              screenView: widget.settings.callScreenView,
+              screens: screens,
+              people: people,
+              peopleView: settings.callPeopleView,
+              screenView: settings.callScreenView,
               speaker: _call.activeSpeaker,
               pinned: _pinned,
               onPin: (id) => setState(() => _pinned = id),
+              self: selfOnStage ? self : null,
             ),
-            self: widget.settings.callHideSelf
-                ? null
-                : RTCVideoView(
-                    _call.localRenderer,
-                    mirror: true,
-                    objectFit:
-                        RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  ),
+            self: selfOnStage ? null : self,
             chat: widget.settings.callChatOpen
                 ? ConversationPane(
                     key: _chatKey,
@@ -1344,79 +1311,25 @@ class _CallPageState extends State<CallPage> {
                     onCall: () {},
                   )
                 : null,
-            // Shrinks rather than overflows in a narrow window.
-            controls: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton.filled(
-                    tooltip: _call.micOn ? 'Mute' : 'Unmute',
-                    icon: Icon(_call.micOn ? Icons.mic : Icons.mic_off),
-                    onPressed: _call.toggleMic),
-                const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip: _call.noiseCancel
-                        ? 'Noise cancellation is on'
-                        : 'Noise cancellation is off',
-                    isSelected: _call.noiseCancel,
-                    icon: const Icon(Icons.noise_control_off),
-                    selectedIcon: const Icon(Icons.noise_aware),
-                    onPressed: _toggleNoiseCancel),
-                const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip:
-                        _call.camOn ? 'Turn camera off' : 'Turn camera on',
-                    icon: Icon(
-                        _call.camOn ? Icons.videocam : Icons.videocam_off),
-                    onPressed: _call.toggleCam),
-                const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip: 'Background and touch up',
-                    isSelected: _call.background != CallBackground.none ||
-                        _call.touchUp > 0,
-                    icon: const Icon(Icons.wallpaper_outlined),
-                    selectedIcon: const Icon(Icons.wallpaper),
-                    onPressed: _call.camOn ? _chooseBackground : null),
-                const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip: _call.choosingScreen
-                        ? 'Choose what to share in the system\'s window'
-                        : _call.sharingScreen
-                            ? 'Stop sharing your screen'
-                            : 'Share your screen',
-                    icon: Icon(_call.sharingScreen
-                        ? Icons.stop_screen_share
-                        : Icons.screen_share),
-                    onPressed: _call.choosingScreen ? null : _toggleScreen),
-                const SizedBox(width: 12),
-                _viewMenu(),
-                const SizedBox(width: 12),
-                ValueListenableBuilder(
-                  valueListenable: widget.unread,
-                  builder: (context, unread, _) {
-                    final open = widget.settings.callChatOpen;
-                    final waiting = !open && unread > 0;
-                    return IconButton.filled(
-                      tooltip: open
-                          ? 'Hide chat'
-                          : waiting
-                          ? 'Show chat ($unread unread)'
-                          : 'Show chat',
-                      icon: Badge(
-                        isLabelVisible: waiting,
-                        label: Text('$unread'),
-                        child: Icon(open ? Icons.chat : Icons.chat_outlined),
-                      ),
-                      onPressed: _toggleChat,
-                    );
-                  },
-                ),
-                const SizedBox(width: 12),
-                IconButton.filled(
-                    tooltip: 'Hang up',
-                    style: IconButton.styleFrom(backgroundColor: Colors.red),
-                    icon: const Icon(Icons.call_end),
-                    onPressed: () => Navigator.of(context).pop()),
-              ],
-            ))),
+            controls: CallControls(
+              settings: widget.settings,
+              micOn: _call.micOn,
+              noiseCancel: _call.noiseCancel,
+              camOn: _call.camOn,
+              effectsOn:
+                  _call.background != CallBackground.none || _call.touchUp > 0,
+              sharing: _call.sharingScreen,
+              choosingScreen: _call.choosingScreen,
+              unread: widget.unread,
+              onMic: _call.toggleMic,
+              onNoiseCancel: _toggleNoiseCancel,
+              onCamera: _call.toggleCam,
+              onBackground: _chooseBackground,
+              onScreen: _toggleScreen,
+              onViewChanged: () => setState(() {}),
+              onChat: _toggleChat,
+              onHangUp: () => Navigator.of(context).pop(),
+            ),
           );
+  }
 }

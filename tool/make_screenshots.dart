@@ -1,7 +1,7 @@
 // Renders the screenshots for the README and wiki from the app's real widgets,
 // with made-up people and messages, so no real account shows. Fonts come from
-// the Flutter SDK, because tests have none of their own. There's no title bar,
-// and no call screen, which needs real video.
+// the Flutter SDK, because tests have none of their own. There's no title bar.
+// The call screens use painted people (tool/screenshot_call.dart).
 //
 //   XDG_CONFIG_HOME=$(mktemp -d) flutter test tool/make_screenshots.dart
 //
@@ -17,6 +17,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tala/main.dart';
 import 'package:tala/src/app_colors.dart';
 import 'package:tala/src/app_menu.dart';
+import 'package:tala/src/background_picker.dart';
+import 'package:tala/src/backgrounds.dart';
+import 'package:tala/src/call_layout.dart';
 import 'package:tala/src/avatars.dart';
 import 'package:tala/src/chat.dart';
 import 'package:tala/src/groups.dart';
@@ -33,6 +36,8 @@ import 'package:tala/src/presence.dart';
 import 'package:tala/src/report.dart';
 import 'package:tala/src/report_view.dart';
 import 'package:tala/src/settings.dart';
+
+import 'screenshot_call.dart';
 
 const _out = 'docs/screenshots';
 final _now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -866,6 +871,149 @@ void main() {
       'incoming-call',
       _main(),
       then: () => dialog(t, const IncomingCallDialog(name: 'Daniel Ortiz')),
+    );
+  });
+
+  // Calls, with painted people. The user is Sam in these pictures.
+  const callTitle = 'Weekend hike: In call with 3 other(s)';
+  const callSize = Size(1280, 760);
+  Widget callChat() => ConversationPane(
+    source: _DemoSource(),
+    room: _hike,
+    drafts: _drafts(),
+    showHeader: false,
+    onBack: () {},
+    onCall: () {},
+  );
+  AppSettings callSettings({
+    PeopleView people = PeopleView.grid,
+    ScreenView screen = ScreenView.below,
+    bool chat = true,
+  }) => AppSettings()
+    ..callPeopleView = people
+    ..callScreenView = screen
+    ..callChatOpen = chat
+    ..callHideSelf = false;
+
+  testWidgets('call, grid with chat', (t) {
+    return scene(
+      t,
+      'call-grid',
+      callScreen(
+        title: callTitle,
+        settings: callSettings(),
+        chat: callChat(),
+        people: [
+          figureTile('Maya Chen', speaking: true),
+          figureTile('Daniel Ortiz'),
+          figureTile('Priya Nair'),
+        ],
+      ),
+      size: callSize,
+    );
+  });
+
+  testWidgets('call, speaker view and its menu', (t) {
+    return scene(
+      t,
+      'call-speaker',
+      callScreen(
+        title: callTitle,
+        settings: callSettings(people: PeopleView.speaker, chat: false),
+        speaker: 'Maya Chen',
+        people: [
+          figureTile('Maya Chen', speaking: true),
+          figureTile('Daniel Ortiz'),
+          figureTile('Priya Nair'),
+        ],
+      ),
+      size: callSize,
+      then: () async {
+        await t.tap(find.byTooltip('View'));
+      },
+    );
+  });
+
+  testWidgets('call, noise cancellation and a closed chat', (t) {
+    return scene(
+      t,
+      'call-noise',
+      callScreen(
+        title: callTitle,
+        settings: callSettings(chat: false),
+        noiseCancel: true,
+        unread: 2,
+        people: [
+          figureTile('Maya Chen'),
+          figureTile('Daniel Ortiz', speaking: true),
+        ],
+      ),
+      size: callSize,
+      then: () async {
+        t
+            .state<TooltipState>(
+              find.ancestor(
+                of: find.byIcon(Icons.noise_aware),
+                matching: find.byType(Tooltip),
+              ),
+            )
+            .ensureTooltipVisible();
+      },
+    );
+  });
+
+  testWidgets('call, sharing a screen with people beside', (t) {
+    return scene(
+      t,
+      'call-screen',
+      callScreen(
+        title: callTitle,
+        settings: callSettings(screen: ScreenView.beside, chat: false),
+        sharing: true,
+        screens: const [SlideVideo()],
+        people: [
+          figureTile('Maya Chen'),
+          figureTile('Daniel Ortiz', speaking: true),
+          figureTile('Priya Nair'),
+        ],
+      ),
+      size: callSize,
+    );
+  });
+
+  testWidgets('call, background and touch up', (t) {
+    return scene(
+      t,
+      'call-background',
+      callScreen(
+        title: callTitle,
+        settings: callSettings(chat: false),
+        effectsOn: true,
+        people: [figureTile('Maya Chen'), figureTile('Daniel Ortiz')],
+      ),
+      size: const Size(1280, 860),
+      then: () async {
+        unawaited(
+          showDialog<void>(
+            context: t.element(find.byType(CallLayout)),
+            builder: (_) => BackgroundPicker(
+              current: CallBackground.builtIn[2],
+              choosePicture: () async => null,
+              dir: Directory.systemTemp.createTempSync('tala-shots'),
+              touchUpOn: true,
+              touchUp: 0.5,
+              onTouchUp: (_, _) async => true,
+            ),
+          ),
+        );
+        // The built-in pictures decode outside the test's fake clock.
+        for (var i = 0; i < 3; i++) {
+          await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 300)),
+          );
+          await t.pump();
+        }
+      },
     );
   });
 
