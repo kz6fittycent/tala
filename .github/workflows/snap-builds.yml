@@ -101,6 +101,8 @@ jobs:
 
       - name: Is this version already in the store?
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(grep -m1 -oP '^version: \K[^+\s]+' pubspec.yaml)"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -117,8 +119,19 @@ jobs:
           # commit's build must never replace a newer candidate.
           newest="$(sed 's/+.*//' <<< "$published" | sort -V | tail -n1)"
           # And only from the tip of main: a late run for an older push skips.
+          # Commits on top that all say [skip ci] (notes, docs) start no run
+          # of their own, so they don't count: this build is still the newest.
           tip="$(git ls-remote origin refs/heads/main | cut -f1)"
+          newer_app_commits=0
           if [[ "$tip" != "$GITHUB_SHA" ]]; then
+            compare="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${GITHUB_SHA}...${tip}")"
+            if [[ "$(jq -r .status <<< "$compare")" != "ahead" ]]; then
+              newer_app_commits=1
+            else
+              newer_app_commits="$(jq '[.commits[].commit.message | select(test("\\[skip ci\\]") | not)] | length' <<< "$compare")"
+            fi
+          fi
+          if [[ "$newer_app_commits" != "0" ]]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "::notice::This commit is no longer the tip of main (${tip:0:7}); not uploading."
           elif [[ -n "$newest" && "$(printf '%s\n%s\n' "$newest" "$version" | sort -V | tail -n1)" != "$version" ]] \
