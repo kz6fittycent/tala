@@ -4,7 +4,9 @@ An original Flutter desktop client for Nextcloud Talk, Linux only, shipped as a 
 
 Status and decisions are kept in this file.
 
-## Where things stand (2026-11-19)
+## Where things stand (2026-11-20)
+0.10.1 pushed 2026-11-20 (5c343e2), not yet tested or promoted: `warm_up_icons` for crash #28 (below) and noise cancellation being switched off now logged. #28 is answered and closed. Nothing user-visible changed, so the wiki and README need nothing.
+
 0.10.0 went to stable on 2026-11-19 (the user promoting), after the user tested the candidate: "Tala is working really well with the changes" (a general confirmation; no item-by-item record of which log lines or views were checked). 0.9.2 (pushed the same day, superseded before testing) is in it too. Its first build didn't reach candidate: a `[skip ci]` notes commit landed during the build, and the gate only uploads from main's tip; the gate now ignores `[skip ci]` commits on top (see Repo and releases). What 0.10.0 added:
 - Noise cancellation and touch up appearance (see Noise cancellation and touch up).
 - 1080p at up to 60 fps (the user's word: "go to 1080p", "allow all 60fps"): `callVideo` in `call.dart`, also used by `camera_cycle.dart`; cameras give their nearest. Background effects were multithreaded for it, then moved to the GPU when there's a usable one (see Background blur).
