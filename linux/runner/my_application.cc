@@ -225,6 +225,25 @@ static gboolean my_application_local_command_line(GApplication* application,
   return TRUE;
 }
 
+// Has GTK decode a PNG and an SVG icon from the theme while the snap's runtime
+// is the one Tala started with. GTK aborts the app when a theme icon and its
+// image-missing fallback can't be loaded, which happened once (issue #28)
+// after the GNOME runtime snap was refreshed under a running Tala; image
+// loading set up at start is thought to avoid that. Failures here are ignored.
+static void warm_up_icons() {
+  GtkIconTheme* theme = gtk_icon_theme_get_default();
+  if (!theme) return;
+  static const gchar* const kNames[] = {"image-missing",
+                                       "window-close-symbolic"};
+  for (const gchar* name : kNames) {
+    GError* error = nullptr;
+    GdkPixbuf* icon = gtk_icon_theme_load_icon(theme, name, 16,
+                                               GtkIconLookupFlags(0), &error);
+    if (icon) g_object_unref(icon);
+    g_clear_error(&error);
+  }
+}
+
 // Implements GApplication::startup.
 static void my_application_startup(GApplication* application) {
   // MyApplication* self = MY_APPLICATION(object);
@@ -232,6 +251,7 @@ static void my_application_startup(GApplication* application) {
   // Perform any actions required at application startup.
 
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
+  warm_up_icons();
 }
 
 // Implements GApplication::shutdown.
