@@ -1348,6 +1348,8 @@ class Call extends ChangeNotifier {
   Future<bool> setNoiseCancel(bool wanted) async {
     noiseCancel = wanted;
     notifyListeners();
+    // Switching on is logged once it's known whether it took.
+    if (!wanted) log('call: noise cancellation off');
     final ok = await _applyNoiseCancel();
     if (!ok && noiseCancel == wanted && wanted) {
       noiseCancel = false;
